@@ -13,6 +13,8 @@ import unittest
 
 from tracegen.generator import arrival_intervals, build_datasets, generate
 from tracegen.sources import compile_session
+from tracegen.frontends.weka import normalize_weka
+from tracegen.frontends.common import prefix_hashes
 from tracegen.traffic import offer_times, rate_segments
 
 
@@ -33,7 +35,7 @@ def rows(path):
 
 
 def compile_tokens(requests, size=4):
-    record = {"id": "a", "requests": [{"timestamp": i, "token_ids": tokens}
+    record = {"requests": [{"timestamp": i, "hash_ids": prefix_hashes(tokens, size)}
                                          for i, tokens in enumerate(requests)]}
     return compile_session(record, size, "test", 0, "session_jsonl")
 
@@ -59,7 +61,7 @@ class HashSemantics(unittest.TestCase):
 
     def test_weka_coarsening_and_nested_absolute_offsets(self):
         record = json.loads((ROOT / "examples/data/agent.jsonl").read_text().splitlines()[0])
-        template = compile_session(record, 4, "a", 0, "weka")
+        template = compile_session(normalize_weka(record, 4), 4, "a", 0)
         self.assertEqual([r.offset for r in template.requests], [0, 0.5, 1.5, 2])
         self.assertEqual([len(r.hashes) for r in template.requests], [2, 2, 3, 3])
         a, b, c, d = [r.hashes for r in template.requests]
@@ -70,26 +72,24 @@ class HashSemantics(unittest.TestCase):
 
     def test_hash_only_tail_and_unsupported_resolution(self):
         record = {"block_size": 2, "requests": [
-            {"timestamp": 0, "num_tokens": 7, "hash_ids": [10, 11, 12]}]}
-        template = compile_session(record, 4, "x", 0, "session_jsonl")
+            {"t": 0, "in": 7, "hash_ids": [10, 11, 12]}]}
+        template = compile_session(normalize_weka(record, 4), 4, "x", 0)
         self.assertEqual(len(template.requests[0].hashes), 1)
         for size in (1, 3):
             with self.subTest(size=size), self.assertRaisesRegex(ValueError, "multiple"):
-                compile_session(record, size, "x", 0, "session_jsonl")
-        record["requests"][0]["num_tokens"] = 9
+                normalize_weka(record, size)
+        record["requests"][0]["in"] = 9
         with self.assertRaisesRegex(ValueError, "cover exactly"):
-            compile_session(record, 4, "x", 0, "session_jsonl")
+            normalize_weka(record, 4)
 
     def test_global_identity_and_local_isolation(self):
-        record = {"block_size": 2, "hash_id_scope": "global", "requests": [
-            {"timestamp": 0, "num_tokens": 4, "hash_ids": [10, 11]}]}
-        a = compile_session(record, 2, "x", 0, "session_jsonl")
-        b = compile_session(record, 2, "x", 1, "session_jsonl")
+        record = {"requests": [{"timestamp": 0, "hash_ids": [10, 11]}]}
+        a = compile_session(record, 2, "x", 0, scope="global")
+        b = compile_session(record, 2, "x", 1, scope="global")
         self.assertEqual(a.requests[0].hashes, b.requests[0].hashes)
         from tracegen.generator import Instance
         self.assertEqual(Instance("a", a, 0, {}).materialize(a.requests[0].hashes),
                          Instance("b", b, 0, {}).materialize(b.requests[0].hashes))
-        record["hash_id_scope"] = "local"
         a = compile_session(record, 2, "x", 0, "session_jsonl")
         x = Instance("a", a, 0, {})
         y = Instance("b", a, 0, {})
@@ -100,7 +100,7 @@ class HashSemantics(unittest.TestCase):
     def test_invalid_reference_fails(self):
         for offset in (-1, float("nan"), True):
             with self.subTest(offset=offset), self.assertRaises(ValueError):
-                compile_session({"requests": [{"timestamp": offset, "token_ids": []}]},
+                compile_session({"requests": [{"timestamp": offset, "hash_ids": []}]},
                                 4, "a", 0, "session_jsonl")
         with self.assertRaisesRegex(ValueError, "at least one"):
             compile_session({"requests": []}, 4, "a", 0, "session_jsonl")
@@ -114,11 +114,12 @@ class Generation(unittest.TestCase):
 
     def test_deterministic_golden(self):
         config = demo_config()
+        config["new_block_jitter"] = 0  # Exact replay of the minimal-format reference.
         a, b = self.path / "a.jsonl", self.path / "b.jsonl"
         manifest = generate(config, a)
         generate(config, b)
         self.assertEqual(a.read_bytes(), b.read_bytes())
-        golden = json.loads((ROOT / "tests/golden_v2.json").read_text())
+        golden = json.loads((ROOT / "tests/golden_nonempty_v1.json").read_text())
         self.assertEqual(manifest["output_sha256_uncompressed"], golden["sha256"])
         self.assertEqual(manifest["stats"], golden["stats"])
         self.assertEqual(rows(a)[:3], golden["first_rows"])
@@ -126,6 +127,7 @@ class Generation(unittest.TestCase):
 
     def test_order_schema_template_coverage_and_timing(self):
         config = demo_config()
+        config["new_block_jitter"] = 0
         datasets = build_datasets(config)
         manifest = generate(config, self.path / "out.jsonl", datasets=datasets)
         output = rows(self.path / "out.jsonl")
@@ -141,7 +143,7 @@ class Generation(unittest.TestCase):
             source = next(d for d in datasets if d.name == info["source"])
             template = source.get(info["source_record"])
             request = template.requests[counts[row["session_id"]]]
-            self.assertEqual(len(row["hash_ids"]), request.num_tokens // config["block_size"])
+            self.assertEqual(len(row["hash_ids"]), len(request.hashes))
             self.assertAlmostEqual(row["timestamp"], info["start"] + request.offset)
             self.assertTrue(all(type(h) is int and 0 <= h < 2**64 for h in row["hash_ids"]))
             counts[row["session_id"]] += 1
@@ -186,7 +188,7 @@ class Generation(unittest.TestCase):
     def test_exact_fifo_admission_release_and_area(self):
         source = self.path / "session.jsonl"
         source.write_text(json.dumps({"requests": [
-            {"timestamp": t, "token_ids": [1, 2, 3, 4], "api_time": 1e9}
+            {"timestamp": t, "hash_ids": [1]}
             for t in (0, 4, 8)]}) + "\n")
         config = dict(block_size=4, duration=11, max_concurrent_sessions=1,
                       session_rate=1, arrival={"cv": 0}, datasets=[{"name": "a", "path": str(source)}])
@@ -207,19 +209,20 @@ class Generation(unittest.TestCase):
             {"t": 0, "in": 4, "hash_ids": [1]},
             {"t": 1, "requests": [{"t": 10, "in": 4, "hash_ids": [2]}]},
             {"t": 2, "in": 4, "hash_ids": [3]}]}) + "\n")
+        source.write_text(json.dumps(normalize_weka(json.loads(source.read_text()), 4))+'\n')
         config = dict(block_size=4, duration=13, max_concurrent_sessions=1, session_rate=1,
-                      arrival={"cv": 0}, datasets=[{"name": "a", "path": str(source), "format": "weka"}])
+                      arrival={"cv": 0}, datasets=[{"name": "a", "path": str(source)}])
         manifest = generate(config, self.path / "nested_out.jsonl")
         self.assertEqual([s["start"] for s in manifest["sessions"]], [1, 11])
 
     def test_zero_duration_sessions_release_immediately(self):
         source = self.path / "instant.jsonl"
         source.write_text(json.dumps({"requests": [
-            {"timestamp": 0, "token_ids": []}, {"timestamp": 0, "token_ids": [1]}]}) + "\n")
+            {"timestamp": 0, "hash_ids": []}, {"timestamp": 0, "hash_ids": [1]}]}) + "\n")
         config = dict(block_size=4, duration=5, max_concurrent_sessions=1, session_rate=1,
                       arrival={"cv": 0}, datasets=[{"name": "a", "path": str(source)}])
         manifest = generate(config, self.path / "instant_out.jsonl")
-        self.assertEqual(manifest["stats"]["requests"], 8)
+        self.assertEqual(manifest["stats"]["requests"], 4)
         self.assertEqual(manifest["stats"]["mean_concurrent_sessions"], 0)
         self.assertEqual(manifest["stats"]["active_sessions_at_end"], 0)
 
@@ -263,7 +266,7 @@ class Generation(unittest.TestCase):
             self.assertEqual(path.read_text(), "keep me")
         config = demo_config()
         config["block_size"] = 3
-        with self.assertRaisesRegex(ValueError, "multiple"):
+        with self.assertRaisesRegex(ValueError, "block_size must match"):
             generate(config, path)
         self.assertEqual(path.read_text(), "keep me")
         self.assertEqual(sorted(p.name for p in self.path.iterdir()), ["output.jsonl"])
@@ -274,10 +277,13 @@ class Generation(unittest.TestCase):
     def test_cli(self):
         result = subprocess.run([sys.executable, str(ROOT / "generate.py"), "--config",
                                  str(ROOT / "examples/demo.json"), "--output",
-                                 str(self.path / "cli.jsonl"), "--max-concurrent-sessions", "2"],
+                                 str(self.path / "cli.jsonl"), "--max-concurrent-sessions", "2",
+                                 "--new-block-jitter", "0.6"],
                                 cwd=self.path, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertGreater(len(rows(self.path / "cli.jsonl")), 0)
+        manifest = json.loads((self.path / "cli.jsonl.manifest.json").read_text())
+        self.assertEqual(manifest["config"]["new_block_jitter"], 0.6)
 
 
 class ArrivalSampling(unittest.TestCase):
@@ -303,7 +309,7 @@ class ArrivalSampling(unittest.TestCase):
         ratio = sum(s["source"] == "chat" for s in sessions) / len(sessions)
         self.assertAlmostEqual(ratio, 0.6, delta=0.04)
         self.assertEqual(manifest["stats"]["unique_templates"], 4)
-        self.assertEqual({s["template_duration"] for s in sessions}, {2, 8, 15, 30})
+        self.assertEqual({s["template_duration"] for s in sessions}, {2, 8, 14, 30})
 
     def test_deterministic_burst_and_return_to_base_rate(self):
         config = dict(duration=8, session_rate=1,

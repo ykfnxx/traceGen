@@ -1,5 +1,6 @@
 {
   "block_size": 128,
+  "new_block_jitter": 0.3,
   "duration": 10800,
   "max_concurrent_sessions": 32,
   "session_rate": 0.01,
@@ -9,8 +10,8 @@
   "datasets": [
     {
       "name": "weka-agentic",
-      "path": "../../G35/datasets/cc-traces-weka-061326/traces.jsonl",
-      "format": "weka",
+      "path": "../runs/normalized/weka.jsonl",
+      "format": "session_jsonl",
       "weight": 1.0
     }
   ]

@@ -3,11 +3,13 @@
 from array import array
 from collections import OrderedDict
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cached_property, lru_cache
 import hashlib
 import json
 import math
 from pathlib import Path
+
+from .schema import validate_session
 
 
 def positive(value, name):
@@ -33,7 +35,6 @@ def digest(value):
 class RequestTemplate:
     offset: float
     hashes: array
-    num_tokens: int
 
 
 @dataclass(frozen=True)
@@ -42,89 +43,40 @@ class SessionTemplate:
     requests: tuple[RequestTemplate, ...]
     scope: str
 
-
-def leaves(requests):
-    """Weka nested request t values already use the outer session's clock."""
-    if not isinstance(requests, list):
-        raise ValueError("requests must be a list")
-    for request in requests:
-        if not isinstance(request, dict):
-            raise ValueError("each request must be an object")
-        if "requests" in request:
-            if "hash_ids" in request or "token_ids" in request:
-                raise ValueError("a request group cannot also contain request content")
-            yield from leaves(request["requests"])
-        else:
-            yield request
+    @cached_property
+    def prefix_segments(self):
+        from .variation import prefix_segments
+        return prefix_segments(self.requests)
 
 
-def compile_session(record, block_size, source_name, row_number, source_format):
-    """Hash ordered groups, chaining each digest to its full preceding prefix.
-
-    Source hash labels are opaque prefix identities, not recoverable token data.
-    Hash-only inputs therefore support coarsening by integer multiples only.
-    """
+def compile_session(record, block_size, source_name, row_number, source_format="session_jsonl",
+                    *, scope="local"):
+    """Compile complete block identities; tokenization/reblocking belong to frontends."""
     integer(block_size, "block_size", 1)
-    if not isinstance(record, dict):
-        raise ValueError("each JSONL record must be a session object")
-    scope = record.get("hash_id_scope", "local")
+    if source_format != "session_jsonl":
+        raise ValueError("backend accepts only session_jsonl; convert raw data with prepare.py")
+    validate_session(record)
     if scope not in ("local", "global"):
-        raise ValueError("hash_id_scope must be local or global")
-    source_id = str(record.get("id", row_number))
-    root = digest(["tracegen-prefix-v1", source_name,
+        raise ValueError("dataset hash_id_scope must be local or global")
+    root = digest(["tracegen-prefix-v2", source_name,
                    row_number if scope == "local" else "global", block_size])
 
-    # Cache repeated prefix edges within a template; bound temporary memory.
     @lru_cache(maxsize=65536)
-    def edge(parent, kind, values):
-        return digest([parent, kind, values])
+    def edge(parent, value):
+        return digest([parent, value])
 
     result = []
-    for request in leaves(record.get("requests")):
-        time_key = "t" if source_format == "weka" else "timestamp"
-        offset = request.get(time_key)
-        if (isinstance(offset, bool) or not isinstance(offset, (int, float))
-                or not math.isfinite(offset) or offset < 0):
-            raise ValueError(f"request {time_key} must be finite and >= 0")
-        if "token_ids" in request:
-            values = request["token_ids"]
-            if not isinstance(values, list):
-                raise ValueError("token_ids must be a list")
-            for token in values:
-                integer(token, "token_id")
-            n_tokens = request.get("num_tokens", len(values))
-            integer(n_tokens, "num_tokens")
-            if n_tokens != len(values):
-                raise ValueError("num_tokens must equal len(token_ids)")
-            width, kind = block_size, "tokens"
-        else:
-            source_block_size = integer(record.get("block_size"), "source block_size", 1)
-            if block_size % source_block_size:
-                raise ValueError(
-                    f"block_size={block_size} must be a multiple of source "
-                    f"block_size={source_block_size}; finer content is unavailable")
-            values = request.get("hash_ids")
-            if not isinstance(values, list):
-                raise ValueError("hash_ids must be a list")
-            if any(isinstance(v, bool) or not isinstance(v, (str, int)) for v in values):
-                raise ValueError("source hash_ids must be strings or integers")
-            n_tokens = request.get("in" if source_format == "weka" else "num_tokens")
-            integer(n_tokens, "request token count")
-            if len(values) != n_tokens // source_block_size:
-                raise ValueError("hash_ids must cover exactly all complete source blocks")
-            width, kind = block_size // source_block_size, "source-prefix-hashes"
+    for request in record["requests"]:
         hashes = array("Q")
         parent = root
-        for start in range(0, (len(values) // width) * width, width):
-            parent = edge(parent, kind, tuple(values[start:start + width]))
+        for value in request["hash_ids"]:
+            parent = edge(parent, value)
             hashes.append(parent)
-        result.append(RequestTemplate(float(offset), hashes, n_tokens))
-    if not result:
-        raise ValueError("session must contain at least one model request")
-    result.sort(key=lambda request: request.offset)  # Stable for simultaneous requests.
+        result.append(RequestTemplate(float(request["timestamp"]), hashes))
+    result.sort(key=lambda request: request.offset)
     origin = result[0].offset
-    result = tuple(RequestTemplate(r.offset - origin, r.hashes, r.num_tokens) for r in result)
-    return SessionTemplate(source_id, result, scope)
+    return SessionTemplate(str(row_number), tuple(
+        RequestTemplate(r.offset - origin, r.hashes) for r in result), scope)
 
 
 class Dataset:
@@ -136,11 +88,25 @@ class Dataset:
             raise ValueError("dataset name must be a nonempty string")
         self.path = Path(spec["path"]).resolve()
         self.format = spec.get("format", "session_jsonl")
-        if self.format not in ("weka", "session_jsonl"):
-            raise ValueError(f"unknown dataset format: {self.format}")
+        if self.format != "session_jsonl":
+            raise ValueError("backend accepts only session_jsonl; convert raw data with prepare.py")
+        from .variation import validate_jitter
+        self.new_block_jitter = spec.get("new_block_jitter")
+        if "new_block_jitter" in spec:
+            validate_jitter(self.new_block_jitter)
         self.weight = positive(spec.get("weight", 1), "dataset weight")
-        self.block_size = block_size
+        self.scope = spec.get("hash_id_scope", "local")
+        if self.scope not in ("local", "global"):
+            raise ValueError("dataset hash_id_scope must be local or global")
+        self.block_size = integer(block_size, "block_size", 1)
+        declared_size = integer(spec.get("block_size", block_size), "dataset block_size", 1)
+        if declared_size != block_size:
+            raise ValueError("dataset block_size must match generation block_size; rerun prepare.py")
         self.offsets = []
+        self.record_numbers = []
+        self.timelines = []
+        self.filter_stats = dict(input_sessions=0, input_requests=0,
+                                 excluded_empty_requests=0, excluded_empty_sessions=0)
         self.cache = OrderedDict()
         fingerprint = hashlib.sha256()
         with self.path.open("rb") as stream:
@@ -151,10 +117,33 @@ class Dataset:
                     break
                 fingerprint.update(line)
                 if line.strip():
+                    row_number = self.filter_stats['input_sessions']
+                    try:
+                        record = validate_session(json.loads(line))
+                    except (ValueError, TypeError, KeyError) as exc:
+                        raise ValueError(f'{self.path}, session record {row_number+1}: {exc}') from exc
+                    self.filter_stats['input_sessions'] += 1
+                    self.filter_stats['input_requests'] += len(record['requests'])
+                    times = sorted(r['timestamp'] for r in record['requests'] if r['hash_ids'])
+                    self.filter_stats['excluded_empty_requests'] += len(record['requests'])-len(times)
+                    if not times:
+                        self.filter_stats['excluded_empty_sessions'] += 1
+                        continue
                     self.offsets.append(offset)
+                    self.record_numbers.append(row_number)
+                    self.timelines.append(array('d', (t-times[0] for t in times)))
         if not self.offsets:
-            raise ValueError(f"empty dataset: {self.path}")
+            raise ValueError(f"dataset has no nonempty requests: {self.path}")
         self.sha256 = fingerprint.hexdigest()
+        manifest_path = Path(str(self.path)+'.manifest.json')
+        self.normalization = None
+        if manifest_path.exists():
+            self.normalization = json.loads(manifest_path.read_text())
+            if self.normalization.get('output_sha256') != self.sha256:
+                raise ValueError(f'{manifest_path}: normalization manifest does not match dataset SHA256')
+            prepared_size = self.normalization.get('block_size')
+            if prepared_size is not None and prepared_size != block_size:
+                raise ValueError('prepared block_size must match generation block_size; rerun prepare.py')
 
     def get(self, index):
         if index in self.cache:
@@ -164,7 +153,9 @@ class Dataset:
             with self.path.open("rb") as stream:
                 stream.seek(self.offsets[index])
                 record = json.loads(stream.readline())
-            template = compile_session(record, self.block_size, self.name, index, self.format)
+            record = dict(requests=[r for r in record['requests'] if r['hash_ids']])
+            template = compile_session(record, self.block_size, self.name, self.record_numbers[index],
+                                       self.format, scope=self.scope)
         except (ValueError, TypeError, KeyError) as exc:
             raise ValueError(f"{self.path}, session record {index + 1}: {exc}") from exc
         self.cache[index] = template

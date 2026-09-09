@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from tracegen.generator import build_datasets, generate
+from tracegen.frontends.weka import prepare_weka
 
 
 def require(condition, message):
@@ -63,7 +64,11 @@ def audit_source(path, block_size):
                         main_count += 1
 
         visit(record["requests"])
+        requests = [r for r in requests if r['in'] // block_size > 0]
         requests.sort(key=lambda r: r["t"])
+        if not requests:
+            references.append([])  # Preserve the original source record index.
+            continue
         origin = requests[0]["t"]
         prior = []
         reference = []
@@ -78,7 +83,7 @@ def audit_source(path, block_size):
         "sessions": len(references), "main_requests": main_count,
         "nested_requests": nested_count, "requests": main_count + nested_count,
         "requests_per_session": distribution([len(r) for r in references]),
-        "session_duration_seconds": distribution([r[-1][0] for r in references]),
+        "session_duration_seconds": distribution([r[-1][0] for r in references if r]),
         "request_iat_seconds": distribution([b[0] - a[0] for r in references
                                                for a, b in zip(r, r[1:])]),
     }
@@ -159,19 +164,22 @@ def main():
     parser.add_argument("--block-size", type=int, default=128)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
+    normalized = args.output_dir/'weka.sessions.jsonl'
+    preparation = prepare_weka(args.source,normalized,args.block_size)
     config = {
         "block_size": args.block_size, "duration": args.duration, "max_concurrent_sessions": 32,
         "session_rate": args.session_rate, "seed": args.seed,
+        "new_block_jitter": 0,
         "arrival": {"distribution": "gamma", "cv": 1.5},
-        "datasets": [{"name": "weka-agentic", "path": str(args.source.resolve()),
-                      "format": "weka", "weight": 1.0}],
+        "datasets": [{"name": "weka-agentic", "path": str(normalized.resolve()),
+                      "format": "session_jsonl", "weight": 1.0}],
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)
     print("Indexing and auditing original Weka sessions ...", flush=True)
     datasets = build_datasets(config)
     references, source_stats = audit_source(args.source, args.block_size)
     report = {"python": platform.python_version(), "source": str(args.source.resolve()),
-              "source_sha256": datasets[0].sha256, "source_stats": source_stats,
+              "source_sha256": preparation['sources'][0]['sha256'], "source_stats": source_stats,
               "schema_version": 2, "config": config, "runs": [],
               "code_sha256": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
                               for p in [ROOT / "tracegen/sources.py", ROOT / "tracegen/generator.py", ROOT / "tracegen/traffic.py",

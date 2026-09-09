@@ -18,11 +18,14 @@ def main():
     parser.add_argument("--max-concurrent-sessions", type=int)
     parser.add_argument("--session-rate", type=float)
     parser.add_argument("--arrival-cv", type=float, help="Gamma session-offer IAT CV; 0 is uniform")
+    parser.add_argument("--new-block-jitter", type=float,
+                        help="new-block relative jitter in [0,1], default 0.3; 0 keeps reference lengths")
     parser.add_argument("--seed", type=int)
     args = parser.parse_args()
     try:
         config = json.loads(args.config.read_text())
-        for key in ("block_size", "duration", "max_concurrent_sessions", "session_rate", "seed"):
+        for key in ("block_size", "duration", "max_concurrent_sessions", "session_rate", "seed",
+                    "new_block_jitter"):
             if getattr(args, key) is not None:
                 config[key] = getattr(args, key)
         if args.arrival_cv is not None:

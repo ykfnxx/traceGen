@@ -1,0 +1,73 @@
+{
+  "description": "New-block variation v1: jitter=0.3, demo seed43, branch-preserving suffix resampling",
+  "sha256": "f9f28b087f39519ff6d071bf262208bad053fe480940010042a6982b3cb761eb",
+  "stats": {
+    "requests": 41,
+    "blocks": 83,
+    "empty_hash_requests": 7,
+    "first_timestamp": 0.0003547996030320913,
+    "last_timestamp": 58.71064100558132,
+    "sessions": 12,
+    "truncated_sessions": 3,
+    "omitted_requests_at_end": 4,
+    "actual_rps": 0.6833333333333333,
+    "actual_session_rate": 0.2,
+    "unique_templates": 4,
+    "offered_sessions": 21,
+    "pending_sessions_at_end": 9,
+    "delayed_sessions": 6,
+    "mean_start_delay_seconds": 7.738468868677695,
+    "max_start_delay_seconds": 20.368894090909805,
+    "peak_concurrent_sessions": 3,
+    "mean_concurrent_sessions": 2.3400746208662238,
+    "active_sessions_at_end": 3,
+    "reference_new_blocks": 43,
+    "synthetic_new_blocks": 45,
+    "requests_with_changed_new_blocks": 2
+  },
+  "first_rows": [
+    {
+      "timestamp": 0.0003547996030320913,
+      "hash_ids": [
+        11220424760641043641,
+        14888371902504094835,
+        11983241421051648720
+      ],
+      "session_id": "s00000000"
+    },
+    {
+      "timestamp": 0.5003547996030321,
+      "hash_ids": [
+        11220424760641043641,
+        14888371902504094835,
+        5086082070088532539
+      ],
+      "session_id": "s00000000"
+    },
+    {
+      "timestamp": 1.5003547996030322,
+      "hash_ids": [
+        11220424760641043641,
+        14888371902504094835,
+        5086082070088532539,
+        8955570637874784061
+      ],
+      "session_id": "s00000000"
+    },
+    {
+      "timestamp": 2.000354799603032,
+      "hash_ids": [
+        11220424760641043641,
+        14888371902504094835,
+        11983241421051648720,
+        15696851533178185222
+      ],
+      "session_id": "s00000000"
+    },
+    {
+      "timestamp": 4.809844471632968,
+      "hash_ids": [],
+      "session_id": "s00000001"
+    }
+  ]
+}
