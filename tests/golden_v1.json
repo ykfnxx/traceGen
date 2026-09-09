@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "description": "Fixed seed mixed chat/agent template regression; inspect semantic tests before updating.",
+  "sha256": "472588b9172573a435dc190fe72a056bd3a8d7eec5a7fd3e1e13adbc3fa21c9a",
+  "stats": {
+    "requests": 27,
+    "blocks": 52,
+    "empty_hash_requests": 2,
+    "first_timestamp": 5.8519693975079745,
+    "last_timestamp": 58.2059819980194,
+    "sessions": 9,
+    "truncated_sessions": 3,
+    "omitted_requests_at_end": 3,
+    "actual_rps": 0.45,
+    "actual_session_rate": 0.15,
+    "unique_templates": 4
+  },
+  "first_rows": [
+    {
+      "timestamp": 5.8519693975079745,
+      "hash_ids": [],
+      "session_id": "s00000000"
+    },
+    {
+      "timestamp": 6.8519693975079745,
+      "hash_ids": [
+        9487409630274105110,
+        16441608821981110716
+      ],
+      "session_id": "s00000000"
+    },
+    {
+      "timestamp": 7.8519693975079745,
+      "hash_ids": [
+        9487409630274105110,
+        16441608821981110716,
+        1471020716710373637
+      ],
+      "session_id": "s00000000"
+    }
+  ]
+}

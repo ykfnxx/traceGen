@@ -1,0 +1,16 @@
+{
+  "block_size": 128,
+  "duration": 3600,
+  "load_scale": 1.0,
+  "base_session_rate": 0.01,
+  "seed": 42,
+  "arrival": {"distribution": "gamma", "cv": 1.5},
+  "datasets": [
+    {
+      "name": "weka-agentic",
+      "path": "../../G35/datasets/cc-traces-weka-061326/traces.jsonl",
+      "format": "weka",
+      "weight": 1.0
+    }
+  ]
+}

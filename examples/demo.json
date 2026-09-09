@@ -1,0 +1,12 @@
+{
+  "block_size": 4,
+  "duration": 60,
+  "load_scale": 1.0,
+  "base_session_rate": 0.2,
+  "seed": 42,
+  "arrival": {"distribution": "gamma", "cv": 1.5},
+  "datasets": [
+    {"name": "chat", "path": "data/chat.jsonl", "format": "session_jsonl", "weight": 0.6},
+    {"name": "agent", "path": "data/agent.jsonl", "format": "weka", "weight": 0.4}
+  ]
+}
