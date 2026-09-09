@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Synthesize three intensities and independently check every emitted Weka request."""
+"""Compare session concurrency caps and burst offers on real Weka templates."""
 
 import argparse
 from collections import Counter
 import hashlib
-import itertools
 import json
 import math
 from pathlib import Path
@@ -92,8 +91,9 @@ def validate_trace(path, manifest, references):
     last_time = -1
     rows = blocks = prefix_checks = 0
     fingerprint = hashlib.sha256()
-    scale = manifest["config"]["load_scale"]
     duration = manifest["config"]["duration"]
+    live = set()
+    observed_peak = 0
     bins = [0] * math.ceil(duration / 300)
     for line in path.open():
         fingerprint.update(line.encode())
@@ -105,15 +105,21 @@ def validate_trace(path, manifest, references):
         last_time = timestamp
         info = metadata[sid]
         index = indices[sid]
+        if index == 0:
+            live.add(sid)
+            observed_peak = max(observed_peak, len(live))
+            require(len(live) <= manifest["config"]["max_concurrent_sessions"], "concurrency exceeded")
         offset, count, expected_lcp = references[info["source_record"]][index]
         require(len(hashes) == count, f"incomplete block coverage at {sid}/{index}")
-        require(math.isclose(timestamp, info["start"] + offset / scale, abs_tol=1e-9),
+        require(math.isclose(timestamp, info["start"] + offset, abs_tol=1e-9),
                 f"wrong session timing at {sid}/{index}")
         if index:
             require(lcp(previous_hashes[sid], hashes) == expected_lcp,
                     f"prefix relation changed at {sid}/{index}")
             prefix_checks += 1
         indices[sid] += 1
+        if indices[sid] == info["template_requests"]:
+            live.remove(sid)
         if indices[sid] == info["emitted_requests"]:
             previous_hashes.pop(sid, None)
         else:
@@ -124,45 +130,38 @@ def validate_trace(path, manifest, references):
     for sid, info in metadata.items():
         require(indices[sid] == info["emitted_requests"], "manifest request count mismatch")
         reference = references[info["source_record"]]
-        expected = sum(info["start"] + r[0] / scale < duration for r in reference)
+        expected = sum(info["start"] + r[0] < duration for r in reference)
         require(indices[sid] == expected, "unexpected request missing inside duration")
+        require(info["start"] >= info["offered_start"], "session started before offer")
+        require(math.isclose(info["end"], info["start"] + reference[-1][0]), "wrong session release time")
+    occupancy = sum(min(duration, s["end"]) - s["start"] for s in metadata.values()) / duration
+    require(math.isclose(occupancy, manifest["stats"]["mean_concurrent_sessions"], abs_tol=1e-9),
+            "concurrency area mismatch")
+    require(len(live) == manifest["stats"]["active_sessions_at_end"], "wrong final active sessions")
+    require(observed_peak == manifest["stats"]["peak_concurrent_sessions"], "wrong concurrency peak")
+    require(manifest["stats"]["offered_sessions"] == len(metadata) + manifest["stats"]["pending_sessions_at_end"],
+            "session offer accounting mismatch")
     require(rows == manifest["stats"]["requests"], "wrong total requests")
     require(blocks == manifest["stats"]["blocks"], "wrong total blocks")
     require(fingerprint.hexdigest() == manifest["output_sha256_uncompressed"], "checksum mismatch")
     return {"validated_requests": rows, "validated_blocks": blocks,
             "validated_consecutive_prefix_pairs": prefix_checks,
+            "validated_peak_concurrent_sessions": observed_peak,
             "requests_per_300s": bins, "checks": "passed"}
-
-
-def compare_scales(lower_path, lower_scale, upper_path, upper_scale):
-    count = 0
-    with lower_path.open() as low, upper_path.open() as high:
-        for a, b in itertools.zip_longest(low, high):
-            if a is None:
-                break
-            require(b is not None, "higher intensity lost baseline requests")
-            a, b = json.loads(a), json.loads(b)
-            require(a["session_id"] == b["session_id"], "scale changed session selection")
-            require(a["hash_ids"] == b["hash_ids"], "scale changed request blocks")
-            require(math.isclose(a["timestamp"] * lower_scale, b["timestamp"] * upper_scale,
-                                 abs_tol=1e-9), "scale changed baseline time")
-            count += 1
-    return {"lower_scale": lower_scale, "upper_scale": upper_scale,
-            "identical_baseline_requests": count, "checks": "passed"}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "runs/weka")
-    parser.add_argument("--duration", type=float, default=3600)
-    parser.add_argument("--base-session-rate", type=float, default=0.01)
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "runs/weka_v2")
+    parser.add_argument("--duration", type=float, default=10800)
+    parser.add_argument("--session-rate", type=float, default=0.01)
     parser.add_argument("--block-size", type=int, default=128)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     config = {
-        "block_size": args.block_size, "duration": args.duration, "load_scale": 1.0,
-        "base_session_rate": args.base_session_rate, "seed": args.seed,
+        "block_size": args.block_size, "duration": args.duration, "max_concurrent_sessions": 32,
+        "session_rate": args.session_rate, "seed": args.seed,
         "arrival": {"distribution": "gamma", "cv": 1.5},
         "datasets": [{"name": "weka-agentic", "path": str(args.source.resolve()),
                       "format": "weka", "weight": 1.0}],
@@ -173,29 +172,31 @@ def main():
     references, source_stats = audit_source(args.source, args.block_size)
     report = {"python": platform.python_version(), "source": str(args.source.resolve()),
               "source_sha256": datasets[0].sha256, "source_stats": source_stats,
-              "config": config, "runs": [], "scale_checks": [],
+              "schema_version": 2, "config": config, "runs": [],
               "code_sha256": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
-                              for p in [ROOT / "tracegen/sources.py", ROOT / "tracegen/generator.py",
+                              for p in [ROOT / "tracegen/sources.py", ROOT / "tracegen/generator.py", ROOT / "tracegen/traffic.py",
                                         ROOT / "experiments/run_weka.py"]}}
-    paths = []
-    for scale in (0.5, 1.0, 2.0):
-        print(f"Generating load_scale={scale} ...", flush=True)
-        run_config = dict(config, load_scale=scale)
-        path = args.output_dir / f"weka_scale_{scale:g}.jsonl"
+    scenarios = [
+        ("cap8", dict(config, max_concurrent_sessions=8)),
+        ("cap32", dict(config, max_concurrent_sessions=32)),
+        ("cap32_burst", dict(config, max_concurrent_sessions=32, bursts=[
+            {"start": args.duration / 3, "duration": args.duration / 18, "session_rate": args.session_rate * 5}])),
+    ]
+    for name, run_config in scenarios:
+        print(f"Generating {name} ...", flush=True)
+        path = args.output_dir / f"weka_{name}.jsonl"
         start = time.perf_counter()
         manifest = generate(run_config, path, datasets=datasets)
         elapsed = time.perf_counter() - start
         print(f"Validating {manifest['stats']['requests']} requests ...", flush=True)
         validation = validate_trace(path, manifest, references)
-        result = {"load_scale": scale, "path": str(path.resolve()),
+        result = {"scenario": name, "max_concurrent_sessions": run_config["max_concurrent_sessions"],
+                  "path": str(path.resolve()),
                   "generation_seconds": elapsed, "bytes": path.stat().st_size,
                   "sha256": manifest["output_sha256_uncompressed"],
                   **manifest["stats"], **validation}
         report["runs"].append(result)
-        paths.append((path, scale))
         print(json.dumps(result), flush=True)
-    for (a, low), (b, high) in zip(paths, paths[1:]):
-        report["scale_checks"].append(compare_scales(a, low, b, high))
     (args.output_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(f"All checks passed. Report: {args.output_dir / 'report.json'}", flush=True)
 

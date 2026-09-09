@@ -13,6 +13,7 @@ import unittest
 
 from tracegen.generator import arrival_intervals, build_datasets, generate
 from tracegen.sources import compile_session
+from tracegen.traffic import offer_times, rate_segments
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -117,10 +118,11 @@ class Generation(unittest.TestCase):
         manifest = generate(config, a)
         generate(config, b)
         self.assertEqual(a.read_bytes(), b.read_bytes())
-        golden = json.loads((ROOT / "tests/golden_v1.json").read_text())
+        golden = json.loads((ROOT / "tests/golden_v2.json").read_text())
         self.assertEqual(manifest["output_sha256_uncompressed"], golden["sha256"])
         self.assertEqual(manifest["stats"], golden["stats"])
         self.assertEqual(rows(a)[:3], golden["first_rows"])
+        self.assertEqual(manifest["session_concurrency"], golden["session_concurrency"])
 
     def test_order_schema_template_coverage_and_timing(self):
         config = demo_config()
@@ -147,30 +149,79 @@ class Generation(unittest.TestCase):
             self.assertEqual(n, sessions[sid]["emitted_requests"])
         self.assertGreater(manifest["stats"]["unique_templates"], 1)
 
-    def test_scale_common_sequence_and_fixed_duration(self):
-        generated = []
-        for scale in (0.5, 1, 2):
-            config = demo_config()
-            config["load_scale"] = scale
-            path = self.path / f"{scale}.jsonl"
-            generate(config, path)
-            generated.append(rows(path))
-        self.assertLess(len(generated[0]), len(generated[1]))
-        self.assertLess(len(generated[1]), len(generated[2]))
-        for lower, higher in zip(generated, generated[1:]):
-            for a, b in zip(lower, higher):
-                self.assertEqual(a["session_id"], b["session_id"])
-                self.assertEqual(a["hash_ids"], b["hash_ids"])
-                self.assertAlmostEqual(a["timestamp"], b["timestamp"] * 2)
-
-    def test_complete_sequence_when_duration_is_rescaled(self):
+    def test_longer_duration_keeps_original_request_prefix(self):
         config = demo_config()
         generate(config, self.path / "a.jsonl")
-        config.update(load_scale=2, duration=30)
+        config.update(duration=120)
         generate(config, self.path / "b.jsonl")
         a, b = rows(self.path / "a.jsonl"), rows(self.path / "b.jsonl")
-        self.assertEqual(len(a), len(b))
-        self.assertEqual(a, [dict(r, timestamp=r["timestamp"] * 2) for r in b])
+        self.assertEqual(a, [r for r in b if r["timestamp"] < 60])
+
+    def test_cap_changes_session_starts_not_internal_timing_or_hashes(self):
+        config = demo_config()
+        manifests, outputs = [], []
+        for limit in (1, 3, 100):
+            config["max_concurrent_sessions"] = limit
+            path = self.path / f"{limit}.jsonl"
+            manifest = generate(config, path)
+            self.assertLessEqual(manifest["stats"]["peak_concurrent_sessions"], limit)
+            self.assertEqual(manifest["stats"]["active_sessions_at_end"],
+                             manifest["stats"]["truncated_sessions"])
+            self.assertEqual(manifest["stats"]["offered_sessions"],
+                             manifest["stats"]["sessions"] + manifest["stats"]["pending_sessions_at_end"])
+            manifests.append(manifest)
+            outputs.append(rows(path))
+        for a, b in zip(manifests, manifests[1:]):
+            self.assertEqual(a["offered_session_starts"], b["offered_session_starts"])
+        for limited, uncapped in zip(outputs[:2], [outputs[2]] * 2):
+            for sid in {r["session_id"] for r in limited}:
+                a = [r for r in limited if r["session_id"] == sid]
+                b = [r for r in uncapped if r["session_id"] == sid]
+                self.assertLessEqual(len(a), len(b))
+                for x, y in zip(a, b):
+                    self.assertEqual(x["hash_ids"], y["hash_ids"])
+                    self.assertAlmostEqual(x["timestamp"] - a[0]["timestamp"],
+                                           y["timestamp"] - b[0]["timestamp"])
+
+    def test_exact_fifo_admission_release_and_area(self):
+        source = self.path / "session.jsonl"
+        source.write_text(json.dumps({"requests": [
+            {"timestamp": t, "token_ids": [1, 2, 3, 4], "api_time": 1e9}
+            for t in (0, 4, 8)]}) + "\n")
+        config = dict(block_size=4, duration=11, max_concurrent_sessions=1,
+                      session_rate=1, arrival={"cv": 0}, datasets=[{"name": "a", "path": str(source)}])
+        manifest = generate(config, self.path / "fifo.jsonl")
+        self.assertEqual([r["timestamp"] for r in rows(self.path / "fifo.jsonl")], [1, 5, 9, 9])
+        self.assertEqual([(s["offered_start"], s["start"], s["end"])
+                          for s in manifest["sessions"]], [(1, 1, 9), (2, 9, 17)])
+        stats = manifest["stats"]
+        self.assertEqual(stats["peak_concurrent_sessions"], 1)
+        self.assertAlmostEqual(stats["mean_concurrent_sessions"], 10 / 11)
+        self.assertEqual(stats["offered_sessions"], 10)
+        self.assertEqual(stats["pending_sessions_at_end"], 8)
+        self.assertEqual(stats["max_start_delay_seconds"], 7)
+
+    def test_nested_session_releases_after_last_nested_arrival(self):
+        source = self.path / "nested.jsonl"
+        source.write_text(json.dumps({"block_size": 4, "requests": [
+            {"t": 0, "in": 4, "hash_ids": [1]},
+            {"t": 1, "requests": [{"t": 10, "in": 4, "hash_ids": [2]}]},
+            {"t": 2, "in": 4, "hash_ids": [3]}]}) + "\n")
+        config = dict(block_size=4, duration=13, max_concurrent_sessions=1, session_rate=1,
+                      arrival={"cv": 0}, datasets=[{"name": "a", "path": str(source), "format": "weka"}])
+        manifest = generate(config, self.path / "nested_out.jsonl")
+        self.assertEqual([s["start"] for s in manifest["sessions"]], [1, 11])
+
+    def test_zero_duration_sessions_release_immediately(self):
+        source = self.path / "instant.jsonl"
+        source.write_text(json.dumps({"requests": [
+            {"timestamp": 0, "token_ids": []}, {"timestamp": 0, "token_ids": [1]}]}) + "\n")
+        config = dict(block_size=4, duration=5, max_concurrent_sessions=1, session_rate=1,
+                      arrival={"cv": 0}, datasets=[{"name": "a", "path": str(source)}])
+        manifest = generate(config, self.path / "instant_out.jsonl")
+        self.assertEqual(manifest["stats"]["requests"], 8)
+        self.assertEqual(manifest["stats"]["mean_concurrent_sessions"], 0)
+        self.assertEqual(manifest["stats"]["active_sessions_at_end"], 0)
 
     def test_boundary_accounting_and_empty_window(self):
         config = demo_config()
@@ -180,6 +231,7 @@ class Generation(unittest.TestCase):
         self.assertEqual(stats["requests"] + stats["omitted_requests_at_end"],
                          sum(s["template_requests"] for s in manifest["sessions"]))
         config["duration"] = 1e-12
+        config["bursts"] = []
         manifest = generate(config, self.path / "empty.jsonl")
         self.assertEqual(manifest["stats"]["requests"], 0)
         self.assertEqual(rows(self.path / "empty.jsonl"), [])
@@ -201,8 +253,9 @@ class Generation(unittest.TestCase):
     def test_invalid_config_and_source_never_replace_output(self):
         path = self.path / "output.jsonl"
         path.write_text("keep me")
-        for key, value in (("load_scale", 0), ("duration", -1), ("block_size", True),
-                           ("base_session_rate", float("nan")), ("seed", 1.5)):
+        for key, value in (("max_concurrent_sessions", 0), ("duration", -1), ("block_size", True),
+                           ("session_rate", float("nan")), ("seed", 1.5), ("load_scale", 1),
+                           ("base_session_rate", 0.2)):
             config = demo_config()
             config[key] = value
             with self.subTest(key=key), self.assertRaises(ValueError):
@@ -221,7 +274,7 @@ class Generation(unittest.TestCase):
     def test_cli(self):
         result = subprocess.run([sys.executable, str(ROOT / "generate.py"), "--config",
                                  str(ROOT / "examples/demo.json"), "--output",
-                                 str(self.path / "cli.jsonl"), "--load-scale", "2"],
+                                 str(self.path / "cli.jsonl"), "--max-concurrent-sessions", "2"],
                                 cwd=self.path, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertGreater(len(rows(self.path / "cli.jsonl")), 0)
@@ -243,7 +296,7 @@ class ArrivalSampling(unittest.TestCase):
 
     def test_weighted_source_mix_and_session_heterogeneity(self):
         config = demo_config()
-        config.update(duration=1000, base_session_rate=3)
+        config.update(duration=1000, session_rate=3, max_concurrent_sessions=10000, bursts=[])
         with tempfile.TemporaryDirectory() as folder:
             manifest = generate(config, Path(folder) / "mix.jsonl")
         sessions = manifest["sessions"]
@@ -251,6 +304,33 @@ class ArrivalSampling(unittest.TestCase):
         self.assertAlmostEqual(ratio, 0.6, delta=0.04)
         self.assertEqual(manifest["stats"]["unique_templates"], 4)
         self.assertEqual({s["template_duration"] for s in sessions}, {2, 8, 15, 30})
+
+    def test_deterministic_burst_and_return_to_base_rate(self):
+        config = dict(duration=8, session_rate=1,
+                      bursts=[{"start": 3, "duration": 2, "session_rate": 4}])
+        times = list(offer_times(random.Random(1), rate_segments(config), {"cv": 0}))
+        self.assertEqual(times, [1, 2, 3, 3.25, 3.5, 3.75, 4, 4.25, 4.5, 4.75, 5, 6, 7])
+
+    def test_burst_only_and_zero_traffic(self):
+        config = dict(duration=8, session_rate=0,
+                      bursts=[{"start": 3, "duration": 2, "session_rate": 2}])
+        self.assertEqual(list(offer_times(random.Random(1), rate_segments(config), {"cv": 0})),
+                         [3.5, 4, 4.5, 5])
+        config["bursts"] = []
+        self.assertEqual(list(offer_times(random.Random(1), rate_segments(config), {})), [])
+
+    def test_rate_boundary_preserves_arrival_residual(self):
+        config = dict(duration=5, session_rate=0.5,
+                      bursts=[{"start": 1, "duration": 1, "session_rate": 1}])
+        self.assertEqual(list(offer_times(random.Random(1), rate_segments(config), {"cv": 0})),
+                         [1.5, 3])
+
+    def test_overlapping_bursts_rejected(self):
+        config = dict(duration=8, session_rate=1, bursts=[
+            {"start": 1, "duration": 3, "session_rate": 2},
+            {"start": 3, "duration": 2, "session_rate": 4}])
+        with self.assertRaisesRegex(ValueError, "overlap"):
+            rate_segments(config)
 
 
 if __name__ == "__main__":

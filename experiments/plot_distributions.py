@@ -46,6 +46,8 @@ def read_run(path):
         raise ValueError(f"checksum mismatch: {path}")
     times = np.asarray(timestamps)
     duration = manifest["config"]["duration"]
+    # Read historical v1 artifacts; generation itself rejects removed options.
+    historical_scale = manifest["config"].get("load_scale", 1.0)
     if not len(times) or np.any(np.diff(times) < 0) or times[0] < 0 or times[-1] >= duration:
         raise ValueError(f"empty or invalid request timeline: {path}")
     if len(times) != manifest["stats"]["requests"] or sum(block_counts) != manifest["stats"]["blocks"]:
@@ -61,12 +63,12 @@ def read_run(path):
         raise ValueError("time histogram lost requests")
     rate = counts / np.diff(edges)
     # No serving completion information: do not label this as runtime concurrency.
-    ends = [min(duration, s["start"] + s["template_duration"] / manifest["config"]["load_scale"])
+    ends = [min(duration, s["start"] + s["template_duration"] / historical_scale)
             for s in manifest["sessions"]]
     awaiting = [int(sum(start <= t < end for start, end in zip(session_starts, ends)))
                 for t in (duration / 4, duration / 2, duration * 3 / 4)]
     summary = {
-        "load_scale": manifest["config"]["load_scale"], "duration_seconds": duration,
+        "duration_seconds": duration,
         "requests": len(times), "sessions": len(by_session),
         "unique_templates": manifest["stats"]["unique_templates"],
         "mean_rps": len(times) / duration, "peak_60s_rps": float(rate.max()),
@@ -87,6 +89,14 @@ def read_run(path):
         "sessions_awaiting_scheduled_requests_at_quarters": awaiting,
         "trace_sha256": fingerprint.hexdigest(),
     }
+    if manifest["schema_version"] == 1:
+        summary["load_scale"] = historical_scale
+    else:
+        summary.update({k: manifest["stats"][k] for k in (
+            "peak_concurrent_sessions", "mean_concurrent_sessions", "active_sessions_at_end",
+            "offered_sessions", "pending_sessions_at_end", "delayed_sessions")})
+        summary["max_concurrent_sessions"] = manifest["config"]["max_concurrent_sessions"]
+        summary["session_rate"] = manifest["config"]["session_rate"]
     return dict(summary=summary, times=times, blocks=block_counts, by_session=by_session,
                 manifest=manifest, edges=edges, rate=rate, session_gaps=session_gaps)
 
@@ -129,7 +139,7 @@ def plot(runs, output):
                  f" · seed={config['seed']} · 从空载开始", fontsize=17)
     for run, color in zip(runs, COLORS):
         s = run["summary"]
-        label = f"{s['load_scale']:g}×  ({s['requests']:,} 请求)"
+        label = f"{run['label']}  ({s['requests']:,} 请求)"
         axes[0, 0].stairs(run["rate"], run["edges"] / 60, baseline=None,
                           color=color, label=label, linewidth=1.7)
         axes[0, 1].step(np.r_[0, run["times"], s["duration_seconds"]] / 60,
@@ -152,7 +162,8 @@ def plot(runs, output):
     fig.suptitle("逐 session 请求到达时间\n每个短竖线是一条请求；每行一个 session；红色 > 表示截止时仍有后续请求", fontsize=16)
     for ax, run, color in zip(np.atleast_1d(axes), runs, COLORS):
         metadata = run["manifest"]["sessions"]
-        scale, duration = run["summary"]["load_scale"], run["summary"]["duration_seconds"]
+        scale = run["manifest"]["config"].get("load_scale", 1.0)
+        duration = run["summary"]["duration_seconds"]
         for i, s in enumerate(metadata):
             xs = np.asarray(run["by_session"][s["session_id"]]) / 60
             end = min(duration, s["start"] + s["template_duration"] / scale)
@@ -160,20 +171,60 @@ def plot(runs, output):
             ax.plot(xs, np.full(len(xs), i), "|", markersize=5, markeredgewidth=0.7, color=color)
             if s["emitted_requests"] < s["template_requests"]:
                 ax.plot(duration / 60, i, ">", color="#C74455", markersize=4, clip_on=False)
-        ax.set(title=f"{scale:g}×：{len(metadata)} 个 session，{run['summary']['requests']:,} 个请求",
+        ax.set(title=f"{run['label']}：{len(metadata)} 个 session，{run['summary']['requests']:,} 个请求",
                ylabel="session 序号", ylim=(len(metadata), -1), xlim=(0, duration / 60))
         ax.yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True, nbins=8))
     np.atleast_1d(axes)[-1].set_xlabel("合成时间（分钟）")
     save(fig, output, "session_raster")
+    if all(r["manifest"]["schema_version"] >= 2 for r in runs):
+        plot_concurrency(runs, output)
+
+
+def plot_concurrency(runs, output):
+    fig, axes = plt.subplots(2, 2, figsize=(13.5, 9), layout="constrained")
+    fig.suptitle("Session 并发与 burst 流量\n并发只计第一条至最后一条请求到达；session 内时间保持不变", fontsize=16)
+    for run, color in zip(runs, COLORS):
+        m, label = run["manifest"], run["label"]
+        timeline = m["session_concurrency"]
+        axes[0, 0].step([x["timestamp"] / 60 for x in timeline],
+                        [x["active_sessions"] for x in timeline], where="post",
+                        color=color, label=label)
+        axes[0, 0].axhline(m["config"]["max_concurrent_sessions"], color=color, alpha=0.35, linestyle=":")
+        duration = m["config"]["duration"]
+        edges = np.append(np.arange(0, duration, 300), duration)
+        for ax, values in ((axes[0, 1], m["offered_session_starts"]),
+                           (axes[1, 0], [s["start"] for s in m["sessions"]])):
+            counts, _ = np.histogram(values, edges)
+            ax.stairs(counts / np.diff(edges), edges / 60, baseline=None, color=color, label=label)
+        axes[1, 1].stairs(run["rate"], run["edges"] / 60, baseline=None, color=color, label=label)
+    burst_windows = {(b["start"], b["duration"]) for r in runs for b in r["manifest"]["config"].get("bursts", [])}
+    for ax in axes.flat:
+        for start, length in burst_windows:
+            ax.axvspan(start / 60, (start + length) / 60, color="gray", alpha=0.12)
+        ax.set_xlabel("合成时间（分钟）；灰色区域为 burst 窗口")
+        ax.set_xlim(0, max(r["summary"]["duration_seconds"] for r in runs) / 60)
+        ax.set_ylim(bottom=0)
+    axes[0, 0].set(title="A. 实际活跃 session 数（点线为上限）", ylabel="session 数")
+    axes[0, 1].set(title="B. 新 session 候选到达率（300 秒桶）", ylabel="session / 秒")
+    axes[1, 0].set(title="C. 实际启动 session 速率（300 秒桶）", ylabel="session / 秒")
+    axes[1, 1].set(title="D. 请求到达率（60 秒桶）", ylabel="请求 / 秒")
+    axes[0, 0].legend(frameon=False)
+    save(fig, output, "concurrency_traffic")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--report", type=Path, default=Path("runs/weka/report.json"))
-    parser.add_argument("--output-dir", type=Path, default=Path("runs/weka/distributions"))
+    parser.add_argument("--report", type=Path, default=Path("runs/weka_v2/report.json"))
+    parser.add_argument("--output-dir", type=Path, default=Path("runs/weka_v2/distributions"))
     args = parser.parse_args()
     source_report = json.loads(args.report.read_text())
     runs = [read_run(args.report.parent / Path(r["path"]).name) for r in source_report["runs"]]
+    for run, metadata in zip(runs, source_report["runs"]):
+        if "load_scale" in metadata:
+            run["label"] = f"{metadata['load_scale']:g}× (历史 v1)"
+        else:
+            run["label"] = metadata["scenario"]
+            run["summary"]["scenario"] = metadata["scenario"]
     args.output_dir.mkdir(parents=True, exist_ok=True)
     plot(runs, args.output_dir)
     summaries = [r["summary"] for r in runs]
@@ -184,10 +235,10 @@ def main():
     }, indent=2) + "\n")
     with (args.output_dir / "arrival_rate_60s.csv").open("w") as stream:
         writer = csv.writer(stream)
-        writer.writerow(["load_scale", "start_seconds", "end_seconds", "requests_per_second"])
+        writer.writerow(["scenario", "start_seconds", "end_seconds", "requests_per_second"])
         for run in runs:
             for start, end, rate in zip(run["edges"][:-1], run["edges"][1:], run["rate"]):
-                writer.writerow([run["summary"]["load_scale"], start, end, rate])
+                writer.writerow([run["label"], start, end, rate])
     print(json.dumps(summaries, indent=2))
     print(f"Figures and statistics: {args.output_dir}")
 

@@ -1,5 +1,6 @@
-"""Empirical session templates + Gamma/Weibull session arrivals + time scaling."""
+"""Session arrival traffic, active-session admission, and empirical request timing."""
 
+from collections import deque
 from dataclasses import dataclass, field
 import gzip
 import hashlib
@@ -12,6 +13,7 @@ import random
 import tempfile
 
 from .sources import Dataset, SessionTemplate, digest, integer, positive
+from .traffic import arrival_intervals, offer_times, rate_segments
 
 
 @dataclass
@@ -35,43 +37,19 @@ class Instance:
         return out
 
 
-def arrival_intervals(rng, rate, arrival):
-    distribution = arrival.get("distribution", "gamma")
-    if distribution == "gamma":
-        cv = positive(arrival.get("cv", 1.0), "arrival.cv")
-        shape = 1.0 / (cv * cv)
-        scale = cv * cv / rate
-        if not math.isfinite(shape) or not math.isfinite(scale) or min(shape, scale) <= 0:
-            raise ValueError("arrival.cv is numerically out of range")
-        sample = lambda: rng.gammavariate(shape, scale)
-    elif distribution == "weibull":
-        shape = positive(arrival.get("shape", 1.0), "arrival.shape")
-        try:
-            scale = 1.0 / (rate * math.gamma(1.0 + 1.0 / shape))
-        except (OverflowError, ValueError) as exc:
-            raise ValueError("arrival.shape is numerically out of range") from exc
-        if not math.isfinite(scale) or scale <= 0:
-            raise ValueError("arrival.shape is numerically out of range")
-        sample = lambda: rng.weibullvariate(scale, shape)
-    else:
-        raise ValueError("arrival.distribution must be gamma or weibull")
-    while True:
-        interval = sample()
-        if not math.isfinite(interval) or interval <= 0:
-            raise ValueError("arrival sampling produced a nonpositive/nonfinite interval")
-        yield interval
-
-
 def validate_config(config):
+    for removed in ("load_scale", "base_session_rate"):
+        if removed in config:
+            raise ValueError(f"{removed} has been removed; use max_concurrent_sessions, "
+                             "session_rate, arrival and bursts (request times are not scaled)")
     integer(config.get("block_size"), "block_size", 1)
-    for name in ("duration", "base_session_rate"):
-        positive(config.get(name), name)
-    positive(config.get("load_scale", 1.0), "load_scale")
+    integer(config.get("max_concurrent_sessions"), "max_concurrent_sessions", 1)
+    positive(config.get("duration"), "duration")
     integer(config.get("seed", 0), "seed")
-    if not math.isfinite(config["duration"] * config.get("load_scale", 1.0)):
-        raise ValueError("duration * load_scale must be finite")
     if not isinstance(config.get("arrival", {}), dict):
         raise ValueError("arrival must be an object")
+    rate_segments(config)
+    next(arrival_intervals(random.Random(0), 1, config.get("arrival", {})))
     if not isinstance(config.get("datasets"), list) or not config["datasets"]:
         raise ValueError("datasets must be a nonempty list")
     names = [item["name"] for item in config["datasets"]]
@@ -87,20 +65,19 @@ def build_datasets(config):
 def generate(config, output, *, datasets=None):
     """Write sorted JSONL and a manifest; duration is the output interval [0,D).
 
-    Sample on baseline time [0,D*load_scale), then divide ALL times by load_scale.
-    Separate RNG streams guarantee common session plans across scale experiments.
-    There are no sessions before time zero; right-boundary requests are counted
-    in the manifest and omitted. The generator never fabricates missing blocks.
+    Session offers use absolute sessions/s with optional burst windows. Full
+    sessions wait FIFO for an active-session slot. A slot is released immediately
+    after that session's last request arrives, including nested requests. There
+    is no request service/completion simulation and no request time scaling.
     """
     validate_config(config)
     duration = config["duration"]
-    load_scale = config.get("load_scale", 1.0)
-    horizon = duration * load_scale
+    limit = config["max_concurrent_sessions"]
     seed = config.get("seed", 0)
     arrival = config.get("arrival", {"distribution": "gamma", "cv": 1.0})
-    intervals = arrival_intervals(random.Random(f"arrival:{seed}"),
-                                  config["base_session_rate"], arrival)
-    next_start = next(intervals)  # Validate arrival parameters before opening outputs.
+    segments = rate_segments(config)
+    offers = offer_times(random.Random(f"arrival:{seed}"), segments, arrival)
+    next_offer = next(offers, math.inf)
     chooser = random.Random(f"template:{seed}")
     output = Path(output).resolve()
     manifest_path = Path(str(output) + ".manifest.json")
@@ -116,6 +93,21 @@ def generate(config, output, *, datasets=None):
     weights = [d.weight for d in datasets]
     sessions = []
     pending = []
+    waiting = deque()
+    offered_starts = []
+    concurrency = [{"timestamp": 0.0, "active_sessions": 0}]
+    active = peak = 0
+    area = change_time = 0.0
+
+    def change_active(delta, timestamp):
+        nonlocal active, peak, area, change_time
+        area += active * (timestamp - change_time)
+        change_time = timestamp
+        active += delta
+        if not 0 <= active <= limit:
+            raise RuntimeError("session concurrency invariant violated")
+        peak = max(peak, active)
+        concurrency.append({"timestamp": timestamp, "active_sessions": active})
     stats = {"requests": 0, "blocks": 0, "empty_hash_requests": 0,
              "first_timestamp": None, "last_timestamp": None}
     fingerprint = hashlib.sha256()
@@ -126,34 +118,12 @@ def generate(config, output, *, datasets=None):
     try:
         opener = gzip.open if output.suffix == ".gz" else open
         with opener(temporary, "wt", encoding="utf-8", newline="\n") as stream:
-            while next_start < horizon or pending:
-                if next_start < horizon and (not pending or next_start <= pending[0][0]):
-                    dataset = chooser.choices(datasets, weights=weights, k=1)[0]
-                    index = chooser.randrange(len(dataset.offsets))
-                    template = dataset.get(index)
-                    session_num = len(sessions)
-                    session_id = f"s{session_num:08d}"
-                    metadata = {
-                        "session_id": session_id, "source": dataset.name,
-                        "source_record": index, "source_session_id": template.source_id,
-                        "start": next_start / load_scale,
-                        "template_requests": len(template.requests), "emitted_requests": 0,
-                        "template_duration": template.requests[-1].offset,
-                        "hash_id_scope": template.scope,
-                    }
-                    sessions.append(metadata)
-                    instance = Instance(session_id, template, next_start, metadata)
-                    heapq.heappush(pending, (next_start, session_num, 0, instance))
-                    old_start = next_start
-                    next_start += next(intervals)
-                    if next_start <= old_start or not math.isfinite(next_start):
-                        raise ValueError("session arrival clock overflow or lost precision")
-                    continue
-                base_time, session_num, request_index, instance = heapq.heappop(pending)
-                request = instance.template.requests[request_index]
-                timestamp = base_time / load_scale
-                # A strict half-open horizon, including floating-point division.
-                if timestamp < duration:
+            while next_offer < duration or pending:
+                # Existing requests at a timestamp precede new offers. Releasing
+                # after the last arrival permits FIFO admission at the same time.
+                if pending and pending[0][0] <= next_offer:
+                    timestamp, session_num, request_index, instance = heapq.heappop(pending)
+                    request = instance.template.requests[request_index]
                     hashes = instance.materialize(request.hashes)
                     row = {"timestamp": timestamp, "hash_ids": hashes,
                            "session_id": instance.session_id}
@@ -167,11 +137,43 @@ def generate(config, output, *, datasets=None):
                         stats["first_timestamp"] = timestamp
                     stats["last_timestamp"] = timestamp
                     instance.manifest["emitted_requests"] += 1
-                request_index += 1
-                if request_index < len(instance.template.requests):
-                    following = instance.start + instance.template.requests[request_index].offset
-                    if following < horizon:
-                        heapq.heappush(pending, (following, session_num, request_index, instance))
+                    request_index += 1
+                    if request_index == len(instance.template.requests):
+                        change_active(-1, timestamp)
+                    else:
+                        following = instance.start + instance.template.requests[request_index].offset
+                        if following < duration:
+                            heapq.heappush(pending, (following, session_num, request_index, instance))
+                else:
+                    timestamp = next_offer
+                    waiting.append(timestamp)
+                    offered_starts.append(timestamp)
+                    next_offer = next(offers, math.inf)
+                while waiting and active < limit:
+                    offered = waiting.popleft()
+                    dataset = chooser.choices(datasets, weights=weights, k=1)[0]
+                    index = chooser.randrange(len(dataset.offsets))
+                    template = dataset.get(index)
+                    session_num = len(sessions)
+                    session_id = f"s{session_num:08d}"
+                    metadata = {
+                        "session_id": session_id, "source": dataset.name,
+                        "source_record": index, "source_session_id": template.source_id,
+                        "offered_start": offered, "start": timestamp,
+                        "start_delay": timestamp - offered,
+                        "end": timestamp + template.requests[-1].offset,
+                        "template_requests": len(template.requests), "emitted_requests": 0,
+                        "template_duration": template.requests[-1].offset,
+                        "hash_id_scope": template.scope,
+                    }
+                    if not math.isfinite(metadata["end"]):
+                        raise ValueError("session timeline overflow")
+                    sessions.append(metadata)
+                    instance = Instance(session_id, template, timestamp, metadata)
+                    change_active(1, timestamp)
+                    heapq.heappush(pending, (timestamp, session_num, 0, instance))
+        area += active * (duration - change_time)
+        concurrency.append({"timestamp": duration, "active_sessions": active})
         stats["sessions"] = len(sessions)
         stats["truncated_sessions"] = sum(s["emitted_requests"] < s["template_requests"]
                                            for s in sessions)
@@ -180,10 +182,22 @@ def generate(config, output, *, datasets=None):
         stats["actual_rps"] = stats["requests"] / duration
         stats["actual_session_rate"] = len(sessions) / duration
         stats["unique_templates"] = len({(s["source"], s["source_record"]) for s in sessions})
+        stats.update({
+            "offered_sessions": len(offered_starts), "pending_sessions_at_end": len(waiting),
+            "delayed_sessions": sum(s["start_delay"] > 0 for s in sessions),
+            "mean_start_delay_seconds": sum(s["start_delay"] for s in sessions) / max(1, len(sessions)),
+            "max_start_delay_seconds": max((s["start_delay"] for s in sessions), default=0.0),
+            "peak_concurrent_sessions": peak, "mean_concurrent_sessions": area / duration,
+            "active_sessions_at_end": active,
+        })
         manifest = {
-            "schema_version": 1, "generator": "tracegen-v1", "config": config,
+            "schema_version": 2, "generator": "tracegen-v2", "config": config,
             "timestamp_unit": "seconds", "window": "[0, duration)",
-            "timing": "empirical session offsets; sampled session starts; all times / load_scale",
+            "timing": "request timestamp = admitted session start + unchanged reference offset",
+            "concurrency_semantics": "first arrival through last arrival; no request processing time",
+            "admission": "FIFO session starts; wait at max_concurrent_sessions",
+            "session_rate_segments": segments, "offered_session_starts": offered_starts,
+            "session_concurrency": concurrency,
             "hash_scheme": "blake2b-64 prefix chain; local identities rekeyed per instance",
             "hash_coverage": "complete blocks of the reference request context only",
             "boundary": "empty at time zero; requests at/after duration omitted",

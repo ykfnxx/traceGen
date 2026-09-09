@@ -1,8 +1,9 @@
 {
   "block_size": 4,
   "duration": 60,
-  "load_scale": 1.0,
-  "base_session_rate": 0.2,
+  "max_concurrent_sessions": 3,
+  "session_rate": 0.2,
+  "bursts": [{"start": 20, "duration": 10, "session_rate": 1.0}],
   "seed": 42,
   "arrival": {"distribution": "gamma", "cv": 1.5},
   "datasets": [

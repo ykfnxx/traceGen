@@ -8,8 +8,10 @@
 
 block_size: 控制block粒度，按照block粒度来生成
 duration: 合成数据集的持续周期
-load_scale: 整体请求时序强度倍率，默认1；同时缩放session间和session内的时间间隔
-base_session_rate: session起始的基准到达率，单位session/s
+max_concurrent_sessions: 同时活跃session数量的硬上限
+session_rate: 新session候选到达率，单位session/s，用于调节并发压力
+arrival: 候选session到达间隔分布；Gamma的cv调节随机突发程度
+bursts: 指定时间窗口覆盖session_rate，以控制burst流量
 seed: 随机种子，用于复现实验
 
 ### 输入
@@ -24,6 +26,8 @@ hash_id的数量需要由block_size决定
 
 hash_ids表示请求上下文中完整KV cache block的前缀hash，数量为floor(token_count / block_size)，不足一个block的尾部不加入。每个hash必须体现此前整个前缀，不关注具体文本内容。
 
-第一版按数据源/任务权重抽样完整session模板，保留模板的请求数量、内部相对时序和前缀关系；使用Gamma/Weibull分布生成session起始时间，再通过load_scale统一缩放时间轴。不同session的负载差异来自参考数据，不额外设计复用分布。
+按数据源/任务权重抽样完整session模板，保留请求数量、内部相对时序和前缀关系。使用Gamma/Weibull分布与分时段速率生成候选session；达到并发上限时按FIFO延后新session开始，已启动session内部请求时序不变。不同session的负载差异来自参考数据，不额外设计复用分布。
+
+只关心到达的请求，默认都能处理，不模拟请求执行或完成。session在第一条请求到达时开始活跃，最后一条请求（含subagent）到达后释放。旧load_scale整体时间缩放强度定义废弃，不再使用。
 
 输出仅保留[0, duration)内的请求，截止处省略的后续请求数量记录在manifest中。仅有源block hash时，目标block_size必须是源block_size的正整数倍。
