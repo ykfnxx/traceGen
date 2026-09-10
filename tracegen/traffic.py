@@ -40,8 +40,10 @@ def arrival_intervals(rng, rate, arrival):
         raise ValueError("arrival.distribution must be gamma or weibull")
     while True:
         interval = sample()
-        if not math.isfinite(interval) or interval <= 0:
-            raise ValueError("arrival sampling produced a nonpositive/nonfinite interval")
+        # A positive Gamma/Weibull draw can underflow to zero in float64.
+        # Keep that arrival as a simultaneous event rather than resampling it.
+        if not math.isfinite(interval) or interval < 0:
+            raise ValueError("arrival sampling produced a negative/nonfinite interval")
         yield interval
 
 
@@ -98,8 +100,11 @@ def offer_times(rng, segments, arrival):
                 remaining -= capacity
                 break
             timestamp = min(end, position + remaining / rate)
-            if timestamp <= previous:
-                raise ValueError("session offer clock lost precision")
+            # Bursty distributions can draw gaps below the clock's ULP. The
+            # rounded timestamp then equals the previous one: keep both offers.
+            # Consumers already support nondecreasing time and FIFO tie order.
+            if timestamp < previous:
+                raise ValueError("session offer clock moved backwards")
             if timestamp >= horizon:
                 return
             yield timestamp

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock
 
 from tracegen.generator import arrival_intervals, build_datasets, generate
 from tracegen.sources import compile_session
@@ -287,6 +288,31 @@ class Generation(unittest.TestCase):
 
 
 class ArrivalSampling(unittest.TestCase):
+    def test_sub_ulp_and_underflow_gaps_keep_all_offers(self):
+        rng = Mock()
+        rng.gammavariate.side_effect = [1.0, 1e-30, 0.0, 0.5, 1.0]
+        times = list(offer_times(rng, rate_segments(dict(duration=2, session_rate=1)),
+                                 {"cv": 3}))
+        self.assertEqual(times, [1.0, 1.0, 1.0, 1.5])
+        self.assertEqual(rng.gammavariate.call_count, 5)
+
+    def test_negative_and_nonfinite_intervals_rejected(self):
+        for value in [-1, float("nan"), float("inf")]:
+            with self.subTest(value=value):
+                rng = Mock()
+                rng.gammavariate.return_value = value
+                with self.assertRaisesRegex(ValueError, "negative/nonfinite"):
+                    next(arrival_intervals(rng, 1, {"cv": 3}))
+
+    def test_three_hour_bursty_offer_clock_regression(self):
+        times = list(offer_times(random.Random("arrival:42"),
+                                 rate_segments(dict(duration=10800, session_rate=10)),
+                                 {"cv": 1.5}))
+        self.assertGreater(len(times), 100000)
+        self.assertTrue(all(0 <= t < 10800 for t in times))
+        self.assertTrue(all(a <= b for a, b in zip(times, times[1:])))
+        self.assertTrue(any(a == b for a, b in zip(times, times[1:])))
+
     def test_gamma_rate_and_burstiness(self):
         iterator = arrival_intervals(random.Random(17), 2, {"cv": 1.8})
         values = [next(iterator) for _ in range(50000)]

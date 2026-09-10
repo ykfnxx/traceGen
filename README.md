@@ -91,6 +91,8 @@ timestamp = session 实际开始时间 + 参考请求相对时间
 
 到达分布也支持 `{"distribution":"weibull","shape":0.7}`。它与 Gamma 一样按期望间隔校准；候选时钟通过分段速率的积分进行变换，跨 burst 边界保留尚未消耗的间隔，不重置随机相位。`arrival.cv` 只作用于 Gamma。
 
+高 CV 或较高到达率可能产生小于浮点时间分辨率的间隔。这些候选保留为同一 timestamp 的独立到达事件，不丢弃、不重新抽样，也不人为设置最小间隔；时间保证不递减。旧版本的 `session offer clock lost precision` 是误将这种同刻到达判为错误，需更新实现。
+
 ## session 并发的生命周期
 
 一个 session 从第一条请求到达时开始活跃，在最后一条请求到达后立即释放。Weka subagent 的嵌套请求也计入外层 session；不能在主请求结束而 subagent 仍有后续请求时提前释放。参考 `api_time` 不参与计数。

@@ -44,7 +44,7 @@ class NonemptyRequestMix(unittest.TestCase):
         self.assertEqual(m['sources'][0]['filtering']['excluded_empty_requests'],4)
 
     def test_count_replay_matches_generation_with_cap_bursts_and_cutoff(self):
-        for seed,cap,cv in [(0,1,0),(1,3,1.5),(42,100,1)]:
+        for seed,cap,cv in [(0,1,0),(1,3,1.5),(42,100,1),(42,1,5),(42,100,10)]:
             c=deepcopy(self.config);c.update(seed=seed,max_concurrent_sessions=cap,arrival={'cv':cv},
                                           bursts=[dict(start=20,duration=5,session_rate=8)])
             ds=build_datasets(c);p=count_replay(c,ds,[d.weight for d in ds])
