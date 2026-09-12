@@ -1,4 +1,4 @@
-"""Calibrate session sampling weights to final, nonempty request proportions.
+"""Calibrate source rate scales (or legacy weights) to final request proportions.
 
 The lightweight count replay models admission and the finite output window;
 it does not generate hashes or drop valid requests to enforce a quota.
@@ -10,7 +10,7 @@ import random
 
 from .generator import validate_config
 from .sources import positive, integer
-from .traffic import offer_times, rate_segments
+from .streams import SessionOffers, independent, source_segments, rate_scales
 
 
 def count_replay(config, datasets, weights):
@@ -21,11 +21,10 @@ def count_replay(config, datasets, weights):
     for w in weights:
         positive(w, 'sampling weight')
     duration = config['duration']
-    seed = config.get('seed', 0)
-    offers = offer_times(random.Random(f'arrival:{seed}'), rate_segments(config),
-                         config.get('arrival', {'distribution':'gamma', 'cv':1.0}))
-    next_offer = next(offers, math.inf)
-    chooser = random.Random(f'template:{seed}')
+    limit = config.get('max_concurrent_sessions') or math.inf
+    offers = SessionOffers(config, datasets, weights)
+    next_event = offers.next()
+    next_offer = next_event[0]
     releases, waiting, sessions = [], deque(), []
     active = peak = 0
     counts = dict.fromkeys((d.name for d in datasets), 0)
@@ -35,12 +34,13 @@ def count_replay(config, datasets, weights):
             active -= 1
         else:
             timestamp = next_offer
-            waiting.append(timestamp)
-            next_offer = next(offers, math.inf)
-        while waiting and active < config['max_concurrent_sessions']:
-            offered = waiting.popleft()
-            d = chooser.choices(datasets, weights=weights, k=1)[0]
-            index = chooser.randrange(len(d.offsets))
+            waiting.append(next_event)
+            next_event = offers.next()
+            next_offer = next_event[0]
+        while waiting and active < limit:
+            event = waiting.popleft()
+            offered = event[0]
+            d, index, _ = offers.admit(event)
             times = d.timelines[index]
             count = sum(timestamp + offset < duration for offset in times)
             end = timestamp + times[-1]
@@ -73,9 +73,17 @@ def calibrate(config, datasets, targets, tolerance=.01, max_iterations=100):
         raise ValueError('tolerance must be less than 1')
     integer(max_iterations, 'max_iterations', 1)
     means = [sum(map(len, d.timelines))/len(d.timelines) for d in datasets]
-    weights = [target / mean for target, mean in zip(targets, means)]
-    norm = sum(weights)
-    weights = [w/norm for w in weights]
+    # Keep the configured integrated candidate volume while redistributing it.
+    masses = ([sum((s['end']-s['start'])*s['session_rate'] for s in source_segments(config, spec))
+               for spec in config['datasets']] if independent(config) else [1.0]*len(datasets))
+    if any(m == 0 for m in masses):
+        raise ValueError('cannot calibrate a positive request ratio for a zero-traffic source')
+    budget = (sum(m*w for m,w in zip(masses, rate_scales(config, datasets)))
+              if independent(config) else 1.0)
+    def normalize(values):
+        norm = sum(w*m for w,m in zip(values,masses)) / budget
+        return [w/norm for w in values]
+    weights = normalize([target / (mean*mass) for target, mean, mass in zip(targets, means, masses)])
     rng = random.Random(f'mix-calibration:{config.get("seed",0)}')
     best = None
     history = []
@@ -101,8 +109,7 @@ def calibrate(config, datasets, targets, tolerance=.01, max_iterations=100):
         else:
             weights = [w*(target/max(share,.5/prediction['requests']))**.6
                        for w,target,share in zip(weights,targets,shares)]
-        norm = sum(weights)
-        weights = [w/norm for w in weights]
+        weights = normalize(weights)
     raise ValueError(f'request mix did not converge within {max_iterations} iterations: '
                      f'best error {best["max_absolute_error"]:.4%}, tolerance {tolerance:.4%}; '
                      'increase session_rate/duration or relax tolerance')

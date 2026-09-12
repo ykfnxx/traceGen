@@ -13,7 +13,8 @@ import random
 import tempfile
 
 from .sources import Dataset, SessionTemplate, digest, integer, positive
-from .traffic import arrival_intervals, offer_times, rate_segments
+from .traffic import arrival_intervals, rate_segments
+from .streams import SessionOffers, independent, rate_scales, source_segments
 from .variation import BlockVariation, validate_jitter
 
 
@@ -68,16 +69,32 @@ def validate_config(config):
             raise ValueError(f"{removed} has been removed; use max_concurrent_sessions, "
                              "session_rate, arrival and bursts (request times are not scaled)")
     integer(config.get("block_size"), "block_size", 1)
-    integer(config.get("max_concurrent_sessions"), "max_concurrent_sessions", 1)
     positive(config.get("duration"), "duration")
     integer(config.get("seed", 0), "seed")
     validate_jitter(config.get("new_block_jitter", 0.3))
     if not isinstance(config.get("arrival", {}), dict):
         raise ValueError("arrival must be an object")
-    rate_segments(config)
-    next(arrival_intervals(random.Random(0), 1, config.get("arrival", {})))
     if not isinstance(config.get("datasets"), list) or not config["datasets"]:
         raise ValueError("datasets must be a nonempty list")
+    if config.get("max_concurrent_sessions") is not None or not independent(config):
+        integer(config.get("max_concurrent_sessions"), "max_concurrent_sessions", 1)
+    if independent(config):
+        if any(k in config for k in ('session_rate', 'arrival', 'bursts')):
+            raise ValueError('independent streams require traffic settings inside each dataset')
+        for spec in config['datasets']:
+            if not isinstance(spec.get('traffic'), dict):
+                raise ValueError('every dataset must specify traffic for independent streams')
+            if 'weight' in spec:
+                raise ValueError('independent streams use traffic.session_rate and rate_scale, not weight')
+            scale = positive(spec.get('rate_scale', 1), 'rate_scale')
+            source_segments(config, spec, scale)
+            arrival = spec['traffic'].get('arrival', {})
+            if not isinstance(arrival, dict):
+                raise ValueError('dataset traffic.arrival must be an object')
+            next(arrival_intervals(random.Random(0), 1, arrival))
+    else:
+        rate_segments(config)
+        next(arrival_intervals(random.Random(0), 1, config.get('arrival', {})))
     for spec in config["datasets"]:
         declared_size = integer(spec.get("block_size", config["block_size"]), "dataset block_size", 1)
         if declared_size != config["block_size"]:
@@ -107,14 +124,11 @@ def generate(config, output, *, datasets=None):
     """
     config = dict(config, new_block_jitter=config.get("new_block_jitter", 0.3))
     validate_config(config)
+    if any("request_ratio" in spec for spec in config["datasets"]):
+        raise ValueError("use experiments/run_mixed.py --config to calibrate request_ratio first")
     duration = config["duration"]
-    limit = config["max_concurrent_sessions"]
+    limit = config.get("max_concurrent_sessions") or math.inf
     seed = config.get("seed", 0)
-    arrival = config.get("arrival", {"distribution": "gamma", "cv": 1.0})
-    segments = rate_segments(config)
-    offers = offer_times(random.Random(f"arrival:{seed}"), segments, arrival)
-    next_offer = next(offers, math.inf)
-    chooser = random.Random(f"template:{seed}")
     output = Path(output).resolve()
     manifest_path = Path(str(output) + ".manifest.json")
     source_paths = {Path(spec["path"]).resolve() for spec in config["datasets"]}
@@ -126,12 +140,16 @@ def generate(config, output, *, datasets=None):
          s.get("weight", 1), s.get("format", "session_jsonl"), s.get('new_block_jitter'), s.get('hash_id_scope', 'local')) for s in config["datasets"]
     ]:
         raise ValueError("preloaded datasets do not match configuration")
-    weights = [d.weight for d in datasets]
+    offers = SessionOffers(config, datasets, rate_scales(config, datasets))
+    segments = offers.segments
+    next_event = offers.next()
+    next_offer = next_event[0]
     blocks_by_source = {d.name:0 for d in datasets}
     sessions = []
     pending = []
     waiting = deque()
     offered_starts = []
+    offered_by_source = dict.fromkeys((d.name for d in datasets), 0)
     concurrency = [{"timestamp": 0.0, "active_sessions": 0}]
     active = peak = 0
     area = change_time = 0.0
@@ -186,16 +204,19 @@ def generate(config, output, *, datasets=None):
                             heapq.heappush(pending, (following, session_num, request_index, instance))
                 else:
                     timestamp = next_offer
-                    waiting.append(timestamp)
+                    waiting.append(next_event)
                     offered_starts.append(timestamp)
-                    next_offer = next(offers, math.inf)
+                    if offers.independent:
+                        offered_by_source[datasets[next_event[1]].name] += 1
+                    next_event = offers.next()
+                    next_offer = next_event[0]
                 while waiting and active < limit:
-                    offered = waiting.popleft()
-                    dataset = chooser.choices(datasets, weights=weights, k=1)[0]
-                    index = chooser.randrange(len(dataset.offsets))
+                    event = waiting.popleft()
+                    offered = event[0]
+                    dataset, index, source_session_id = offers.admit(event)
                     template = dataset.get(index)
                     session_num = len(sessions)
-                    session_id = f"s{session_num:08d}"
+                    session_id = source_session_id or f"s{session_num:08d}"
                     metadata = {
                         "session_id": session_id, "source": dataset.name,
                         "source_record": dataset.record_numbers[index], "source_session_id": template.source_id,
@@ -244,6 +265,7 @@ def generate(config, output, *, datasets=None):
             "timing": "request timestamp = admitted session start + unchanged reference offset",
             "concurrency_semantics": "first arrival through last arrival; no request processing time",
             "admission": "FIFO session starts; wait at max_concurrent_sessions",
+            "arrival_mode": "independent_sources" if offers.independent else "shared_clock",
             "session_rate_segments": segments, "offered_session_starts": offered_starts,
             "session_concurrency": concurrency,
             "hash_scheme": ("blake2b-64 prefix chain v2; varied segments per local instance"
@@ -266,11 +288,14 @@ def generate(config, output, *, datasets=None):
             "sources": [{"name": d.name, "path": str(d.path), "format": d.format,
                          "sha256": d.sha256, "session_records": len(d.offsets),
                          "normalization": d.normalization, "filtering": d.filter_stats} for d in datasets],
-            "source_mix": [{"name": d.name, "weight":d.weight,
+            "source_mix": [{"name": d.name,
+                            **({"rate_scale": config["datasets"][i].get("rate_scale", 1.0),
+                                "offered_sessions": offered_by_source[d.name]} if offers.independent
+                               else {"weight": d.weight}),
                             "sessions":sum(s['source']==d.name for s in sessions),
                             "requests":sum(s['emitted_requests'] for s in sessions if s['source']==d.name),
                             "block_references":blocks_by_source[d.name]}
-                           for d in datasets],
+                           for i, d in enumerate(datasets)],
             "stats": stats, "sessions": sessions,
         }
         fd, manifest_temp = tempfile.mkstemp(prefix=f".{manifest_path.name}.", dir=output.parent)

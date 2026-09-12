@@ -1,0 +1,41 @@
+{
+  "block_size": 4,
+  "duration": 600,
+  "seed": 42,
+  "new_block_jitter": 0.3,
+  "datasets": [
+    {
+      "name": "chat",
+      "path": "data/chat.jsonl",
+      "request_ratio": 0.6,
+      "traffic": {
+        "session_rate": 0.2,
+        "arrival": {
+          "cv": 0.7
+        }
+      }
+    },
+    {
+      "name": "agent",
+      "path": "data/agent.sessions.jsonl",
+      "request_ratio": 0.4,
+      "traffic": {
+        "session_rate": 0.1,
+        "arrival": {
+          "cv": 2
+        },
+        "bursts": [
+          {
+            "start": 200,
+            "duration": 100,
+            "session_rate": 0.4
+          }
+        ]
+      }
+    }
+  ],
+  "calibration": {
+    "tolerance": 0.02,
+    "max_iterations": 150
+  }
+}

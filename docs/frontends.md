@@ -7,7 +7,7 @@ Weka 原始数据    → weka 插件    → weka.jsonl
 SwissAI 原始数据 → swissai 插件 → swissai.jsonl
 LMSYS 原始数据   → lmsys 插件   → lmsys.jsonl
 
-合成器：按配置权重选择数据集 → 在该数据集中均匀抽取 session → 生成请求到达 trace
+合成器：各来源按独立流量配置采样 session → 展开请求 → 按时间合并 trace
 ```
 
 ## 最小统一格式
@@ -78,24 +78,31 @@ LMSYS 没有逐轮时间：首轮为 0，后续间隔合成自 Gamma 分布，�
 
 原始 LMSYS 仓库需要接受访问条件并授权下载；插件读取本地文件，不绕过访问限制。`examples/data/lmsys.fixture.jsonl` 是人工测试样例，不能用来宣称真实 LMSYS 分布。
 
-## 合成阶段按数据集配比采样
+## 合成阶段分来源生成并合并
+
+完成两份数据的前端转换后运行（绘图依赖 matplotlib、numpy）：
 
 ```bash
-python3 generate.py --config examples/mixed.json --output runs/mixed_3h.jsonl
+python3 experiments/run_mixed.py --config examples/mixed.json --output-dir runs/mixed_3h
 ```
 
-配置分别指定两份独立输入，示例 [examples/mixed.json](../examples/mixed.json) 为：
+配置分别指定两份独立输入，示例 [examples/mixed.json](../examples/mixed.json) 的数据源部分为：
 
 ```json
 {"datasets": [
-  {"name":"swissai","path":"../runs/normalized/swissai.jsonl","weight":0.5,"hash_id_scope":"global","new_block_jitter":0},
-  {"name":"lmsys","path":"../runs/normalized/lmsys.jsonl","weight":0.5}
+  {"name":"swissai","path":"../runs/normalized/swissai.jsonl","request_ratio":0.5,
+   "hash_id_scope":"global","new_block_jitter":0,
+   "traffic":{"session_rate":0.005,"arrival":{"cv":1.5}}},
+  {"name":"lmsys","path":"../runs/normalized/lmsys.jsonl","request_ratio":0.5,
+   "traffic":{"session_rate":0.005,"arrival":{"cv":0.7}}}
 ]}
 ```
 
-每次启动新 session，先按 `weight / sum(weights)` 选择来源，再从该来源的独立索引均匀抽取一行。数据集大小不额外乘进权重，也不预先合成一个数据池。两份输入的目标 block size 都是 128。各 `datasets[]` 项可覆盖 `new_block_jitter`：SwissAI global 使用 0，LMSYS 继承顶层 0.3。转换只做一次，调权重不需要重新 tokenize。
+每个来源按自己的 `traffic` 生成候选 session，并从自己的独立索引均匀抽取一行，再合并到公共时间线。两份输入的目标 block size 都是 128。各来源可以覆盖 `new_block_jitter`：SwissAI global 使用 0，LMSYS 继承顶层 0.3。转换只做一次，调整流量或目标请求比例不需要重新 tokenize。
 
-`weight` 是**有效采样单元的概率权重**，不是请求数或 block 数比例。需要最终请求数比例时，使用 `experiments/run_mixed.py --ratios ...` 校准后生成，详见 README；空请求不参与配比计算。manifest 的 `source_mix` 记录每个来源实际单元数、请求数和 block 引用数。含有 `request_window` 时，`max_concurrent_sessions` 限制同时活跃的采样单元，不能解释为 SwissAI 的真实用户会话并发。
+`request_ratio` 是最终非空请求占比目标。校准通过来源速率乘数 `rate_scale` 调整实际流量，计入全局 FIFO 准入与窗口截断；省略所有比例则按配置速率直接合成。保存的 `mixed.config.json` 可用于 `generate.py` 复现，详见 README。manifest 的 `source_mix` 记录各来源候选数、实际 session 数、请求数和 block 引用数。
+
+全局 `max_concurrent_sessions` 可省略以关闭准入限制。含有 `request_window` 时，限制的是同时活跃的采样单元，不能解释为 SwissAI 的真实用户会话并发。旧公共时钟配置仍支持 `weight` 作为 session 来源选择权重。
 
 ## 自定义插件
 

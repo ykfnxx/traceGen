@@ -2,25 +2,36 @@
   "block_size": 128,
   "duration": 10800,
   "max_concurrent_sessions": 32,
-  "session_rate": 0.01,
   "new_block_jitter": 0.3,
   "seed": 42,
-  "arrival": {
-    "distribution": "gamma",
-    "cv": 1.5
-  },
   "datasets": [
     {
       "name": "swissai",
       "path": "../runs/normalized/swissai.jsonl",
-      "weight": 0.5,
       "new_block_jitter": 0,
-      "hash_id_scope": "global"
+      "hash_id_scope": "global",
+      "request_ratio": 0.5,
+      "traffic": {
+        "session_rate": 0.005,
+        "arrival": {
+          "cv": 1.5
+        }
+      }
     },
     {
       "name": "lmsys",
       "path": "../runs/normalized/lmsys.jsonl",
-      "weight": 0.5
+      "request_ratio": 0.5,
+      "traffic": {
+        "session_rate": 0.005,
+        "arrival": {
+          "cv": 0.7
+        }
+      }
     }
-  ]
+  ],
+  "calibration": {
+    "tolerance": 0.01,
+    "max_iterations": 150
+  }
 }
