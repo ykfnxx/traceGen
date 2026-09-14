@@ -3,3 +3,12 @@ __pycache__/
 runs/
 .pytest_cache/
 .venv-frontends/
+web/node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/
+
+# Local experiment and visual verification artifacts
+docs/assets/
+docs/paper-pattern-results.json
+docs/workbench-verification.md

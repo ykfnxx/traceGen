@@ -1,0 +1,70 @@
+{
+  "version": 3,
+  "duration": 43200,
+  "seed": 42,
+  "block_size": 128,
+  "traffic": {
+    "session_rate": 0.5,
+    "resolution": 300,
+    "arrival": {
+      "cv": 1
+    }
+  },
+  "tasks": [
+    {
+      "key": "requests",
+      "clients": {
+        "count": 1
+      },
+      "session": {
+        "requests": 1,
+        "initial_private_tokens": 256,
+        "output_tokens": 64,
+        "gap": 0
+      },
+      "weight": 0.9692307692307692
+    },
+    {
+      "key": "conversation",
+      "clients": {
+        "count": 1
+      },
+      "session": {
+        "requests": {
+          "distribution": "discrete",
+          "values": [
+            2,
+            3,
+            4,
+            6
+          ],
+          "weights": [
+            0.3,
+            0.3,
+            0.2,
+            0.2
+          ]
+        },
+        "initial_private_tokens": 256,
+        "output_tokens": 64,
+        "gap": {
+          "distribution": "lognormal",
+          "mean": 867.1137658463456,
+          "cv": 1.7946297158457374
+        },
+        "external_tokens": {
+          "distribution": "gamma",
+          "mean": 64,
+          "cv": 1
+        },
+        "growth_multiplier": {
+          "distribution": "lognormal",
+          "mean": 1,
+          "cv": 0.3
+        }
+      },
+      "weight": 0.03076923076923077
+    }
+  ],
+  "notes": "ServeGen \u00a75.2: roughly 10% multi-turn requests, reported mean 3.5 turns, ITT concentrated near 100s with long tail. Discrete shape and lognormal sigma=1.2 (mode=100s), token lengths and rate are assumptions. 12h, empty start, censored end."
+}

@@ -1,324 +1,78 @@
 # traceGen
 
-[English](README.md) | [简体中文](README_ZH.md)
+English | [简体中文](README_ZH.md)
 
-traceGen synthesizes request-arrival traces for KVCache management experiments. Each source dataset is converted separately into a minimal session JSONL format. A JSON configuration lists the files to read and the traffic settings for each source. Sources are generated independently and merged by arrival time.
+traceGen synthesizes multi-turn LLM serving arrivals directly from task configurations. An overall **session-start intensity** and task mix feed a pool of independent clients. Each session uses its own seed to sample request count, context growth and inter-request gaps. Requests are merged chronologically, with synthetic prefix-dependent block identities.
 
-The generator accepts any number of named sources. It has no fixed dataset list and does not require sources to be Weka, SwissAI, or LMSYS. Those names identify optional raw-data conversion frontends, not synthesis modes.
+The new generator requires no dataset, tokenizer or real text. It models arrivals, not inference execution or cache capacity. Preset numbers are illustrative assumptions; papers motivate patterns, with no automatic calibration.
 
-Only request arrivals are modeled. There is no inference execution, request completion, service capacity, or real prompt generation. Session-relative timing and reference prefix structure are preserved; new block lengths can be perturbed.
+## Run
 
-## 1. Installation and quick start
-
-Python 3.10+ is required. Core generation uses only the standard library. The mixed experiment runner also analyzes and plots its output, requiring NumPy and Matplotlib.
+Python 3.10+. Generation and JSON analysis use only the standard library. Run from the repository root:
 
 ```bash
-git clone git@github.com:ykfnxx/traceGen.git
-cd traceGen
+python3 generate.py --config examples/config.example.json --output runs/example/trace.jsonl
+python3 experiments/run_synthetic.py --config examples/config.example.json \
+  --output-dir runs/example-report --window 10 --no-plots
+```
+
+For PNG/SVG plots:
+
+```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -r experiments/requirements-plot.txt
-.venv/bin/python experiments/run_mixed.py \
-  --config examples/config.example.json \
-  --output-dir runs/example
+.venv/bin/pip install -r experiments/requirements-plot.txt
+.venv/bin/python experiments/run_synthetic.py --config examples/config.example.json \
+  --output-dir runs/example-report --window 10
 ```
 
-[config.example.json](examples/config.example.json) uses bundled synthetic fixtures, so no external dataset is needed. It generates a 600-second trace using 4-token blocks and targets a 60%/40% request mix. These small fixtures are for exercising the pipeline, not evidence of production workload distributions.
+Changing `--window` changes statistics only; it does not change the trace.
 
-The main output is `runs/example/mixed.jsonl`. To reproduce it without calibration or plotting:
+## Interactive workbench
 
 ```bash
-.venv/bin/python generate.py \
-  --config runs/example/mixed.config.json \
-  --output runs/example/replay.jsonl
+npm --prefix web ci
+npm --prefix web run build
+python3 preview.py
 ```
 
-For a standard-library-only smoke test using a legacy shared-clock example:
+Open http://127.0.0.1:8765. Building requires Node.js 22+; serving requires only Python. Assets are served locally with no CDN dependency. Use `--port` or `--output-dir` to change the local port or run directory.
+
+The React workbench edits global/task/client curves, bursts, distributions, prefix groups and complete JSON configs. Dragging updates input curves immediately; release triggers the Python generator. Freeze a baseline to compare changes with the saved configuration and seed. Task/client filters and window changes analyze existing traces; smoothing, log axes and zoom affect display only. Export configuration, full trace, manifest, filtered statistics and SVG plots. See the [workbench guide](docs/workbench.md).
+
+
+## Configuration
+
+Start with [config.example.json](examples/config.example.json). The [configuration reference](docs/configuration.md) documents every supported field, default and distribution parameterization. [Six presets](examples/presets/README.md) cover chat, coding agents, long agents, head clients, daily cycles and bursts.
+
+- `version: 3` selects pure configuration synthesis. `traffic.session_rate` is sessions/s, as a constant or a time curve. Request RPS emerges from multi-turn expansion.
+- Task and client weights are normalized separately. Local bursts and client activity act after allocation without suppressing other sources. Existing sessions retain their gaps.
+- Gamma/Weibull client clocks retain residual integrated intensity through rate changes. Curves are approximated by midpoint constant rates on the `traffic.resolution` grid plus curve/burst knots; reduce resolution to assess numerical convergence.
+- Stable session seeds derive from global seed, task/client keys and client-local ordinal. Separate structure, growth, output and timing streams isolate random draws. Changing traffic may change which sessions are emitted, but not the relative trajectory of a matching session identity.
+- Input tokens accumulate the previous input, previous output and new external content. A once-per-session growth multiplier affects external increments. Complete blocks are counted after accumulating tokens; partial tails survive across turns.
+- Public groups share within global, task or client scope. Private suffixes are session-isolated. Equal lengths do not imply equal content. Prefix identities depend on all preceding blocks.
+
+## Outputs and semantics
+
+`generate.py` writes JSONL (or deterministic `.jsonl.gz`) and `<trace>.manifest.json`. The manifest contains the configuration snapshot, effective client rates, session seeds/identities, planned and emitted counts, cutoff statistics and arrival-lifetime concurrency. Replay is deterministic with the same configuration, generator version and Python random implementation.
+
+Rows contain `timestamp`, `session_id`, `hash_ids`, plus `request_index`, `input_tokens`, `output_tokens` and `external_tokens` by default. Set `output.request_metadata: false` for only the first three fields. On request zero, `external_tokens` is the initial private context; later it is the scaled external increment. Empty block lists are retained.
+
+The output window is `[0, duration)`, starting empty. Requests at/after cutoff are omitted. Active sessions span first through planned last arrival, clipped at cutoff; singleton and zero-duration sessions contribute no active time. This is not inference concurrency. Gaps directly represent successive LLM arrivals without adding response time.
+
+`run_synthetic.py` also writes `config.json`, `report.json`, and optional `curves.png/svg`. Statistics include task/client RPS, gaps, session sizes/durations, token lengths, conditional context quantiles, historical prefix reuse and intervals, token demand, count autocorrelation and gap/growth density. Twelve core panels are rendered. Historical reuse is an opportunity without eviction, not a deployed cache hit rate.
+
+## Scope and compatibility
+
+The configuration core, CLI, JSON analysis, static plots and interactive curve/distribution workbench are implemented. Compression, branches, retries, human-turn hierarchy, admission limits and serving feedback remain outside the [base design](docs/config-driven-refactor.md).
+
+Only version 3 task configs are accepted. Dataset sampling, calibration, old admission/perturbation logic, conversion frontends and their obsolete scripts/tests/examples have been removed. There is a single generation path.
+
+See [paper-pattern validation](docs/paper-pattern-validation.md) for eight manual configurations across three seeds, measured against scoped ServeGen/FineServe statistics. The report distinguishes matching moments from unresolved joint distributions and records censoring and sampling effects. Reproduce with `python3 experiments/validate_paper_patterns.py`; optionally plot with `python3 experiments/plot_paper_patterns.py`.
 
 ```bash
-python3 generate.py --config examples/demo.json --output runs/demo.jsonl
+python3 -m unittest discover -s tests -q
+npm --prefix web run build
+npm --prefix web test
 ```
 
-## 2. Prepare your data
-
-```text
-raw dataset A → frontend A → a.sessions.jsonl ┐
-raw dataset B → frontend B → b.sessions.jsonl ├→ configured independent streams → merged trace
-raw dataset C → frontend C → c.sessions.jsonl ┘
-```
-
-### Minimal normalized input
-
-Each line is one session. The only session field is `requests`; each request has only `timestamp` and `hash_ids`:
-
-```json
-{"requests":[{"timestamp":0,"hash_ids":[101,102]},{"timestamp":2.5,"hash_ids":[101,102,103]}]}
-{"requests":[{"timestamp":0,"hash_ids":[201]}]}
-```
-
-- `timestamp`: finite nonnegative relative time in seconds. Frontends order requests and rebase the first request to zero. Equal timestamps are allowed.
-- `hash_ids`: ordered complete KV-block identities, represented as integers or strings. They must represent reference prefix sharing. An incomplete trailing block is excluded during conversion.
-- Empty `hash_ids` requests are excluded before sampling; sessions with no remaining requests are excluded. Retained request intervals are preserved and the first retained request is rebased to zero. A source with no eligible sessions fails explicitly.
-- No input session ID, token count, provenance, or namespace fields are needed. Extra fields are rejected. Output session IDs are generated by traceGen.
-
-All inputs must use the same block size. The synthesizer does not tokenize or regroup blocks. Changing the block size requires reconversion. `prepare.py` writes a separate `.manifest.json` with conversion settings, fingerprints, and block size; the reader verifies it when present. A manually prepared minimal JSONL file does not require this sidecar.
-
-### Built-in frontends
-
-Run these commands from the repository root, replacing placeholder paths with your files:
-
-```bash
-python3 prepare.py weka --input /path/to/weka/traces.jsonl \
-  --output runs/normalized/weka.jsonl --block-size 128
-
-python3 prepare.py swissai --input /path/to/qwen3-32b-buckets.jsonl \
-  --output runs/normalized/swissai.jsonl --block-size 128 \
-  --session-mode window --window-seconds 300 --bucket-size 16
-
-.venv/bin/python -m pip install -r requirements-frontends.txt
-.venv/bin/python prepare.py lmsys --input /path/to/lmsys/*.parquet \
-  --output runs/normalized/lmsys.jsonl --block-size 128 \
-  --tokenizer /path/to/tokenizer \
-  --turn-interval-mean 30 --turn-interval-cv 1 --seed 42
-```
-
-| Frontend | Behavior and limits |
-|---|---|
-| `weka` | Expands nested requests and retains reference relative timing. Target block size must be a positive multiple of the source's 64-token block size. Source `in` is a length proxy, not exact tokenization. |
-| `swissai` | Requires bucket identities, exact token counts, and timestamps. Removes padded incomplete buckets and groups by an explicit session field or time window. Windows are sampling units, not observed user sessions. |
-| `lmsys` | Tokenizes conversation history with the selected chat template. Each recorded assistant answer defines one input request. Turn timing is synthesized because the source lacks per-turn arrival times. Access-controlled source data must be obtained separately. |
-
-See the [frontend interface guide (Chinese)](docs/frontends.md) for raw schemas and custom plugins. A new frontend implements `configure(parser)` and `convert(records, options, context)` and can be loaded with `prepare.py module:Class`. It emits the same minimal sessions; no generator changes are needed.
-
-### Conversion parameters
-
-| Parameter | Default / meaning |
-|---|---|
-| `frontend` | Required positional argument: `weka`, `swissai`, `lmsys`, or `module:Class`. |
-| `--input` | Required; one or more raw JSONL, JSONL.gz, or Parquet files. Multiple files are shards of one source. Parquet requires PyArrow. |
-| `--output` | Required; uncompressed normalized session JSONL. |
-| `--limit` | Unset: read all raw records. Positive value limits raw records read, not output sessions. |
-| `--block-size` | `128`; tokens per normalized block. Must match synthesis. |
-| SwissAI `--session-mode` | Required: `window` or `field`. |
-| SwissAI `--window-seconds` | `300`; window width in seconds for window grouping. |
-| SwissAI `--session-field` | `session_id`; field used for field grouping. It must exist in the raw input. |
-| SwissAI `--bucket-size` | `16`; source bucket size in tokens; must match the source release. |
-| SwissAI `--token-count-field` | `token_count`; exact token-count field. |
-| SwissAI `--model` | Optional model filter; also supplies a model name when absent in the source. |
-| LMSYS `--tokenizer` | Required tokenizer repository or local directory. |
-| LMSYS `--revision` | Optional pinned tokenizer revision. |
-| LMSYS `--turn-interval-mean` | `30`; mean synthetic inter-turn gap in seconds. |
-| LMSYS `--turn-interval-cv` | `1`; Gamma inter-turn gap CV; `0` makes gaps constant. |
-| LMSYS `--seed` | `42`; seed for synthesized turn timing. Separate from the synthesis seed. |
-| LMSYS `--model`, `--language` | Optional source-label filters. Model filtering does not select the target tokenizer. |
-
-Use `python3 prepare.py <frontend> --help` for frontend-specific options.
-
-## 3. Configure independent sources
-
-Use [examples/config.example.json](examples/config.example.json) as a starting point. This example is valid when saved under `examples/`:
-
-```json
-{
-  "block_size": 4,
-  "duration": 600,
-  "seed": 42,
-  "new_block_jitter": 0.3,
-  "datasets": [
-    {
-      "name": "chat",
-      "path": "data/chat.jsonl",
-      "request_ratio": 0.6,
-      "traffic": {"session_rate": 0.2, "arrival": {"cv": 0.7}}
-    },
-    {
-      "name": "agent",
-      "path": "data/agent.sessions.jsonl",
-      "request_ratio": 0.4,
-      "traffic": {
-        "session_rate": 0.1,
-        "arrival": {"cv": 2},
-        "bursts": [{"start": 200, "duration": 100, "session_rate": 0.4}]
-      }
-    }
-  ],
-  "calibration": {"tolerance": 0.02, "max_iterations": 150}
-}
-```
-
-Add or remove entries in `datasets` to change the sources. `name` is an arbitrary label, not a frontend type. `path` points directly to a normalized file, either absolutely or relative to the configuration directory. Output paths are relative to the current working directory. If you move the configuration, adjust relative input paths.
-
-For real data, replace the paths and set `block_size` to the conversion size. `duration: 10800` means three hours; `86400` means one day. All burst windows must fit inside that duration.
-
-### Top-level parameters
-
-| Field | Default | Meaning / constraints |
-|---|---|---|
-| `block_size` | Required | Positive integer; tokens per block, identical across inputs. |
-| `duration` | Required | Positive seconds; output interval is `[0, duration)`. |
-| `datasets` | Required | Nonempty list of source configurations; no fixed names or count. |
-| `seed` | `0` | Nonnegative integer; controls synthesis randomness. |
-| `new_block_jitter` | `0.3` | Relative perturbation amplitude in `[0,1]`; `0` preserves reference block lengths. |
-| `max_concurrent_sessions` | Unlimited | Omit or use `null` for no admission cap in independent mode. A positive integer limits active sessions globally. `0` is invalid. |
-| `calibration.tolerance` | `0.01` | Absolute request-share error per source, strictly between 0 and 1. `0.01` means one percentage point. Used when request ratios are supplied. |
-| `calibration.max_iterations` | `150` | Positive integer; maximum calibration iterations in `run_mixed.py`. |
-
-### Per-source parameters: `datasets[]`
-
-| Field | Default | Meaning / constraints |
-|---|---|---|
-| `name` | Required | Unique nonempty string; used in reports, session IDs and random seeds. |
-| `path` | Required | Path to the normalized session JSONL file. |
-| `traffic` | Required | Independent candidate session arrival settings; see below. |
-| `request_ratio` | Unset | Positive relative weight for the final emitted request share. Supply for every source or omit for all. Values are normalized. |
-| `rate_scale` | `1` | Positive multiplier on this source's base and burst rates. Calibration writes the effective value here. |
-| `new_block_jitter` | Inherit top level | Override block perturbation for this source. |
-| `hash_id_scope` | `local` | `local` isolates sampled instances while retaining within-session sharing. `global` preserves source identities across instances and requires effective jitter `0`. Named sources remain isolated. |
-| `block_size` | Inherit top level | Optional explicit input-size check; must equal the global value. |
-| `format` | `session_jsonl` | Only supported normalized format. Raw formats must be converted first. |
-
-Independent mode rejects `datasets[].weight` and top-level `session_rate`, `arrival`, and `bursts`. Put arrival settings inside each source's `traffic`.
-
-### Arrival parameters: `datasets[].traffic`
-
-| Field | Default | Meaning / constraints |
-|---|---|---|
-| `session_rate` | Required | Nonnegative candidate sessions per second, before `rate_scale`. Zero disables baseline offers but can be combined with bursts. |
-| `arrival.distribution` | `gamma` | `gamma` or `weibull`. |
-| `arrival.cv` | `1` | Gamma inter-arrival gap CV, nonnegative. `0`: uniform gaps; `1`: exponential gaps; larger values increase gap variability. Only applies to Gamma. |
-| `arrival.shape` | `1` | Positive Weibull shape, used only for Weibull. The mean gap is normalized to the configured rate. |
-| `bursts` | `[]` | Nonoverlapping rate-override windows for this source. |
-| `bursts[].start` | Required | Nonnegative window start in seconds. |
-| `bursts[].duration` | Required | Positive window length in seconds. The entire window must fit in the synthesis duration. |
-| `bursts[].session_rate` | Required | Nonnegative absolute candidate rate during the window; replaces the baseline, then receives `rate_scale`. |
-
-Example Weibull setting: `"arrival": {"distribution": "weibull", "shape": 0.7}`. Different sources can use different distributions. Rate changes preserve the remaining arrival interval in integrated-rate time. Equal timestamps are valid, including gaps smaller than float64 resolution.
-
-## 4. Understand rate, ratios, concurrency, and hashes
-
-### Rate is not request RPS
-
-For a constant baseline, the candidate volume scale is approximately:
-
-```text
-candidate sessions ≈ duration × session_rate × rate_scale
-```
-
-With bursts, integrate the effective piecewise rate instead. Randomness changes realized counts. Each admitted session emits multiple requests according to its template; the cap and cutoff affect how many reach the output. Thus `duration=86400, session_rate=0.2` corresponds to roughly 17,280 candidates before scaling, not 17,280 requests.
-
-`arrival.cv` describes session inter-arrival gaps. It is not the CV of per-second request counts or a target active-session count.
-
-### Request-share calibration
-
-Without `request_ratio`, configured source rates are used directly. With ratios, `run_mixed.py` adjusts per-source `rate_scale` to meet final nonempty request shares after FIFO admission and duration cutoff. It preserves the sum of integrated effective candidate rates across sources; it does not preserve each source's rate or guarantee a fixed realized request count. CV and burst timing remain unchanged.
-
-The log `Generating mixed: expected counts ...` is a count-replay prediction of final requests per source, not session counts. Actual generation checks this prediction. No valid requests are discarded to force a ratio. Short windows, long sessions, or a tight cap may prevent convergence; the runner fails explicitly when it cannot reach tolerance. A source with zero traffic cannot meet a positive target ratio.
-
-The saved `mixed.config.json` contains effective rate scales with pending targets removed. Use that file with `generate.py` for exact replay on the same inputs and implementation. Recalibrate after changing inputs, seed, duration, traffic, or the cap.
-
-### Optional active-session cap
-
-A session becomes active at its first request arrival and releases its slot immediately after its last arrival. With a cap, candidate sessions wait FIFO and start later as a whole:
-
-```text
-request timestamp = admitted session start + retained reference offset
-```
-
-The source and template are fixed before admission. Existing requests at a timestamp are processed before new candidates; candidate ties use source name and source-local order. Session gaps stay unchanged. Without a cap, independent source traces merge directly. The cap is an upper bound, not a target mean concurrency, and it never waits for request execution to finish.
-
-Generation starts empty. Requests at or after `duration` are omitted; admitted-but-truncated sessions and candidates still waiting at the end are counted separately. A SwissAI window is a sampling unit, so its active count is not real user-session concurrency.
-
-### Block variation and reuse
-
-For each request's newly encountered prefix segments, `new_block_jitter=j` draws a shared factor from `Uniform(1-j, 1+j)`, scales segment lengths, and stochastically rounds. Each segment retains at least one block. Already materialized segments, request endpoints and branch relationships stay consistent. "New" is relative to all prior requests in that sampled session, not just the previous request. Fully repeated requests add no new blocks.
-
-Jitter changes block lengths, not arrival times or sampled templates. Short segments may deviate from the nominal factor due to rounding and the one-block minimum. It does not guarantee a fixed total block count. For source-global reuse, set `hash_id_scope: "global"` and `new_block_jitter: 0`; repeated templates then revisit the same source content.
-
-Source names and the global seed derive independent random streams. With fixed scales and no cap-induced delay, adding, removing, reordering or modifying other sources leaves a source's trace unchanged. Calibration intentionally couples effective rates. Renaming a source changes its stream and identities. Generated hashes are not a specific serving framework's native hash ABI.
-
-## 5. Commands and outputs
-
-### Command-line entrypoints
-
-| Command | Parameters |
-|---|---|
-| `experiments/run_mixed.py` | Required `--config`; optional `--output-dir` (default: repository `runs/mixed`). All source, timing and ratio settings belong in JSON. Produces trace, verifies it, analyzes and plots. |
-| `generate.py` | Required `--config`, `--output`. Outputs JSONL, or gzip when the output suffix is `.gz`, plus a manifest. Does not calibrate or analyze. Input config must not contain `request_ratio`. |
-| `experiments/analyze_prefix_reuse.py` | `--traces` followed by one or more generated trace paths; optional `--labels` and `--output-dir` (default `runs/minimal_trial/distribution_analysis`). Matching manifests are required. Supply paths explicitly to avoid historical default inputs. |
-
-`generate.py` supports these optional top-level overrides:
-
-| Flag | Effect |
-|---|---|
-| `--block-size`, `--duration`, `--seed` | Override the corresponding JSON fields. Input block-size checks and burst bounds still apply. |
-| `--max-concurrent-sessions` | Set a positive global cap. To remove it, edit the independent config to omit the field or use `null`. |
-| `--new-block-jitter` | Override the top-level default; per-source overrides still take precedence. |
-| `--session-rate`, `--arrival-cv` | Shared-clock legacy configs only. The latter selects Gamma. Independent configs reject these global arrival fields. |
-
-### Output files and metrics
-
-| File | Contents |
-|---|---|
-| `mixed.jsonl` | Requests sorted by arrival time. |
-| `mixed.jsonl.manifest.json` | Effective config, source fingerprints/filter counts, session provenance, concurrency timeline, and generation statistics. |
-| `mixed.config.json` | Effective replay configuration with resolved absolute source paths. |
-| `report.json` | Calibration history when enabled, source mix, timing and block-prefix analysis. |
-| `00_mixed_requests.csv`, `00_mixed_60s.csv` | Request-level and 60-second aggregate statistics; request CSV is omitted for an empty trace. |
-| `mixed_arrivals_prefix_reuse.png`, `.pdf` | Python/Matplotlib plots of request arrivals and prefix reuse. |
-
-Example output row:
-
-```json
-{"timestamp":5.85,"hash_ids":[123,456],"session_id":"chat:00000000"}
-```
-
-| Metric | Meaning |
-|---|---|
-| Manifest `stats.requests`, `stats.blocks` | Emitted requests and total block references, including repeated references. |
-| `offered_sessions`, `sessions`, `pending_sessions_at_end` | Candidate offers, admitted sessions, and candidates still waiting at cutoff. |
-| `truncated_sessions`, `omitted_requests_at_end` | Admitted sessions with omitted tail requests; number of those omitted requests. |
-| `actual_rps`, `actual_session_rate` | Emitted requests / duration; admitted sessions / duration. |
-| `peak_concurrent_sessions`, `mean_concurrent_sessions` | Peak and time-weighted mean active-session counts. |
-| `delayed_sessions`, `mean_start_delay_seconds`, `max_start_delay_seconds` | Admission delays; mean is over all admitted sessions, including zero delays. |
-| Manifest `source_mix` | Per-source offers, effective scale, admitted sessions, requests and block references in independent mode. |
-| Report `runs[].analysis.unique_hashes` | Distinct blocks across the emitted trace. Not the same as manifest `unique_templates`. |
-| `cross_session_unique_hashes` | Distinct blocks observed in at least two output sessions. |
-| `reused_rate`, `within_rate`, `cross_extra_rate` | Historical prefix reuse: total, within-session, and extra cross-session contribution, weighted by block references. |
-
-`generate.py` alone does not compute global unique blocks. Read the mixed runner's analysis:
-
-```bash
-python3 - <<'PY'
-import json
-with open('runs/example/report.json') as f:
-    report = json.load(f)
-for run in report['runs']:
-    a = run['analysis']
-    print(run['name'], 'requests:', a['requests'],
-          'unique blocks:', a['unique_hashes'], 'prefix reuse:', a['reused_rate'])
-PY
-```
-
-Reuse is a historical opportunity with no eviction, capacity, or TTL model. It is not a deployed cache hit rate. Large, repeatedly extended contexts can produce high block-weighted reuse even when request shares look balanced.
-
-## 6. Verification and troubleshooting
-
-```bash
-python3 -m unittest discover -s tests -v
-.venv/bin/python experiments/analyze_prefix_reuse.py \
-  --traces runs/example/mixed.jsonl --output-dir runs/example_analysis
-```
-
-Optional frontend tests require `requirements-frontends.txt`. Tests cover filtering, prefix consistency, jitter, independent source streams, FIFO admission, cutoff, calibration/generation agreement and arbitrary source file lists. Large generated files live under ignored `runs/`.
-
-| Symptom | Action |
-|---|---|
-| File not found | Resolve input paths relative to the config directory, not the shell directory. Replace placeholder raw-data paths. |
-| Block-size mismatch | Reconvert inputs to the same size; changing only the synthesis setting does not regroup blocks. |
-| Empty source after filtering | Supply sessions with at least one complete block in a retained request. |
-| Calibration fails | Inspect session lengths and cutoff; increase duration/traffic, relax tolerance or review the cap. These changes alter the workload. |
-| Global identities with nonzero jitter | Set that source's `new_block_jitter` to `0`, or use local scope. |
-| `session offer clock lost precision` on an older checkout | Update the implementation; equal rounded arrival timestamps are valid and retained in the current code. |
-
-Legacy shared-clock JSON is still accepted by `generate.py`: it places `session_rate`, `arrival`, and `bursts` at the top level, requires a positive `max_concurrent_sessions`, and uses positive `datasets[].weight` (default `1`) to choose a source before uniformly sampling a session. Examples: [demo.json](examples/demo.json), [weka.json](examples/weka.json). Do not mix that schema with per-source `traffic`.
-
-The old `run_mixed.py --weka/--swissai/--lmsys/--ratios` interface has been removed. Use the config file list. `load_scale` and `base_session_rate` are removed as well. Automatic time-window parameter fitting and NB micro-burst generation are not currently implemented.
+Tests verify deterministic replay, stream isolation, rate allocation, renewal residuals, ordering/cutoff, token accounting, partial tails, prefix sharing/isolation and analysis-window independence. These checks do not establish production representativeness.

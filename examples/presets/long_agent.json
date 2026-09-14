@@ -1,0 +1,100 @@
+{
+  "version": 3,
+  "duration": 300,
+  "seed": 42,
+  "block_size": 128,
+  "notes": "人工构造的参考参数，用于展示聊天与 Agent 规律；不是论文实测或校准结果。",
+  "traffic": {
+    "session_rate": 0.3,
+    "resolution": 1,
+    "arrival": {
+      "cv": 1
+    }
+  },
+  "prefix_groups": [
+    {
+      "key": "chat-system",
+      "tokens": 512,
+      "scope": "task"
+    },
+    {
+      "key": "coding-system",
+      "tokens": 2048,
+      "scope": "task"
+    }
+  ],
+  "tasks": [
+    {
+      "key": "coding_agent",
+      "weight": 1,
+      "clients": {
+        "count": 4,
+        "weight_exponent": 1
+      },
+      "arrival": {
+        "distribution": "gamma",
+        "cv": 1.5
+      },
+      "prefix_groups": [
+        {
+          "key": "coding-system"
+        }
+      ],
+      "session": {
+        "requests": {
+          "distribution": "discrete",
+          "values": [
+            20,
+            60,
+            150
+          ],
+          "weights": [
+            0.3,
+            0.5,
+            0.2
+          ]
+        },
+        "initial_private_tokens": {
+          "distribution": "lognormal",
+          "mean": 1800,
+          "cv": 0.8,
+          "max": 12000
+        },
+        "growth_multiplier": {
+          "distribution": "lognormal",
+          "mean": 1,
+          "cv": 0.5,
+          "min": 0.2,
+          "max": 4
+        },
+        "external_tokens": {
+          "distribution": "lognormal",
+          "mean": 1800,
+          "cv": 1.2,
+          "max": 16000
+        },
+        "output_tokens": {
+          "distribution": "gamma",
+          "mean": 350,
+          "cv": 0.8,
+          "max": 4000
+        },
+        "gap": {
+          "distribution": "discrete",
+          "values": [
+            0.5,
+            2,
+            20,
+            120
+          ],
+          "weights": [
+            0.3,
+            0.55,
+            0.13,
+            0.02
+          ]
+        }
+      }
+    }
+  ]
+}

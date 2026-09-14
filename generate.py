@@ -1,47 +1,41 @@
 #!/usr/bin/env python3
-"""Generate a trace: python3 generate.py --config examples/demo.json --output runs/demo.jsonl"""
-
+"""根据 version 3 配置生成 LLM serving 请求 trace。"""
 import argparse
 import json
 from pathlib import Path
 import sys
-
-from tracegen.generator import generate
+from tracegen.synthesis import generate
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True, help="JSONL or .jsonl.gz")
-    parser.add_argument("--block-size", type=int)
-    parser.add_argument("--duration", type=float)
-    parser.add_argument("--max-concurrent-sessions", type=int)
-    parser.add_argument("--session-rate", type=float)
-    parser.add_argument("--arrival-cv", type=float, help="Gamma session-offer IAT CV; 0 is uniform")
-    parser.add_argument("--new-block-jitter", type=float,
-                        help="new-block relative jitter in [0,1], default 0.3; 0 keeps reference lengths")
-    parser.add_argument("--seed", type=int)
+    parser.add_argument('--config', type=Path, required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--duration', type=float)
+    parser.add_argument('--block-size', type=int)
+    parser.add_argument('--seed', type=int)
+    parser.add_argument('--session-rate', type=float)
+    parser.add_argument('--arrival-cv', type=float)
     args = parser.parse_args()
     try:
-        config = json.loads(args.config.read_text())
-        for key in ("block_size", "duration", "max_concurrent_sessions", "session_rate", "seed",
-                    "new_block_jitter"):
-            if getattr(args, key) is not None:
-                config[key] = getattr(args, key)
+        config = json.loads(args.config.read_text(encoding='utf-8'))
+        for field in ('duration', 'block_size', 'seed'):
+            if getattr(args, field) is not None:
+                config[field] = getattr(args, field)
+        if args.session_rate is not None:
+            config.setdefault('traffic', {})['session_rate'] = args.session_rate
         if args.arrival_cv is not None:
-            config["arrival"] = {"distribution": "gamma", "cv": args.arrival_cv}
-        for dataset in config["datasets"]:
-            dataset["path"] = str((args.config.resolve().parent / dataset["path"]).resolve())
-        if args.output.resolve() == args.config.resolve():
-            raise ValueError("output must not overwrite the configuration")
+            config.setdefault('traffic', {})['arrival'] = {'distribution': 'gamma', 'cv': args.arrival_cv}
+        if args.config.resolve() in (args.output.resolve(), Path(str(args.output.resolve()) + '.manifest.json')):
+            raise ValueError('output must not overwrite the configuration')
         manifest = generate(config, args.output)
-    except (ValueError, OSError, KeyError, TypeError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    except (ValueError, TypeError, KeyError, OSError) as exc:
+        print(f'error: {exc}', file=sys.stderr)
         return 2
-    print(json.dumps(manifest["stats"], indent=2))
-    print(f"Trace: {args.output}\nManifest: {args.output}.manifest.json")
+    print(json.dumps(manifest['stats'], indent=2))
+    print(f'Trace: {args.output}\nManifest: {args.output}.manifest.json')
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     raise SystemExit(main())

@@ -1,0 +1,29 @@
+{
+  "version": 3,
+  "duration": 172800,
+  "seed": 42,
+  "block_size": 128,
+  "traffic": {
+    "session_rate": 0.25,
+    "resolution": 3600,
+    "arrival": {
+      "cv": 1
+    }
+  },
+  "tasks": [
+    {
+      "key": "requests",
+      "clients": {
+        "count": 2412,
+        "weight_exponent": 0
+      },
+      "session": {
+        "requests": 1,
+        "initial_private_tokens": 256,
+        "output_tokens": 64,
+        "gap": 0
+      }
+    }
+  ],
+  "notes": "ServeGen \u00a73.3: 2412 clients, top 29 contribute 90% in 48h. Exponent and rate are manual assumptions; single-request sessions isolate client shares."
+}

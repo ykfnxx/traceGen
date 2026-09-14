@@ -1,0 +1,28 @@
+{
+  "version": 3,
+  "duration": 3600,
+  "seed": 42,
+  "block_size": 128,
+  "traffic": {
+    "session_rate": 10,
+    "resolution": 300,
+    "arrival": {
+      "cv": 3
+    }
+  },
+  "tasks": [
+    {
+      "key": "requests",
+      "clients": {
+        "count": 64
+      },
+      "session": {
+        "requests": 1,
+        "initial_private_tokens": 256,
+        "output_tokens": 64,
+        "gap": 0
+      }
+    }
+  ],
+  "notes": "Mechanism control, no numeric paper target: fixed global session intensity and per-client IAT CV=3; compare aggregate request statistics at client counts 1 and 64."
+}

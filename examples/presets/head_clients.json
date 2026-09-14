@@ -5,43 +5,11 @@
   "block_size": 128,
   "notes": "人工构造的参考参数，用于展示聊天与 Agent 规律；不是论文实测或校准结果。",
   "traffic": {
-    "session_rate": {
-      "points": [
-        [
-          0,
-          0.15
-        ],
-        [
-          60,
-          0.4
-        ],
-        [
-          150,
-          0.2
-        ],
-        [
-          230,
-          0.5
-        ],
-        [
-          300,
-          0.15
-        ]
-      ]
-    },
+    "session_rate": 0.3,
     "resolution": 1,
     "arrival": {
-      "distribution": "gamma",
       "cv": 1
-    },
-    "bursts": [
-      {
-        "start": 120,
-        "duration": 30,
-        "multiplier": 3,
-        "ramp": 5
-      }
-    ]
+    }
   },
   "prefix_groups": [
     {
@@ -60,7 +28,8 @@
       "key": "chat",
       "weight": 3,
       "clients": {
-        "count": 8
+        "count": 20,
+        "weight_exponent": 1.6
       },
       "prefix_groups": [
         {
@@ -121,8 +90,8 @@
       "key": "coding_agent",
       "weight": 1,
       "clients": {
-        "count": 4,
-        "weight_exponent": 1
+        "count": 20,
+        "weight_exponent": 1.6
       },
       "arrival": {
         "distribution": "gamma",

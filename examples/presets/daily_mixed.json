@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "duration": 300,
+  "duration": 86400,
   "seed": 42,
   "block_size": 128,
   "notes": "人工构造的参考参数，用于展示聊天与 Agent 规律；不是论文实测或校准结果。",
@@ -9,39 +9,31 @@
       "points": [
         [
           0,
+          0.01
+        ],
+        [
+          21600,
+          0.03
+        ],
+        [
+          36000,
+          0.1
+        ],
+        [
+          64800,
           0.15
         ],
         [
-          60,
-          0.4
-        ],
-        [
-          150,
-          0.2
-        ],
-        [
-          230,
-          0.5
-        ],
-        [
-          300,
-          0.15
+          86400,
+          0.01
         ]
-      ]
+      ],
+      "period": 86400
     },
-    "resolution": 1,
+    "resolution": 60,
     "arrival": {
-      "distribution": "gamma",
       "cv": 1
-    },
-    "bursts": [
-      {
-        "start": 120,
-        "duration": 30,
-        "multiplier": 3,
-        "ramp": 5
-      }
-    ]
+    }
   },
   "prefix_groups": [
     {

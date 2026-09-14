@@ -1,0 +1,19 @@
+{
+  "name": "tracegen-workbench",
+  "private": true,
+  "version": "3.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.1",
+    "vite": "6.4.3"
+  }
+}

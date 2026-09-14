@@ -2,7 +2,7 @@
 
 import math
 
-from .sources import positive
+from .validation import positive
 
 
 def nonnegative(value, name):
@@ -45,38 +45,6 @@ def arrival_intervals(rng, rate, arrival):
         if not math.isfinite(interval) or interval < 0:
             raise ValueError("arrival sampling produced a negative/nonfinite interval")
         yield interval
-
-
-def rate_segments(config):
-    """Nonoverlapping burst windows override the absolute base session rate."""
-    duration = positive(config.get("duration"), "duration")
-    base = nonnegative(config.get("session_rate"), "session_rate")
-    bursts = config.get("bursts", [])
-    if not isinstance(bursts, list):
-        raise ValueError("bursts must be a list")
-    windows = []
-    for burst in bursts:
-        if not isinstance(burst, dict):
-            raise ValueError("each burst must be an object")
-        start = nonnegative(burst.get("start"), "burst.start")
-        end = start + positive(burst.get("duration"), "burst.duration")
-        rate = nonnegative(burst.get("session_rate"), "burst.session_rate")
-        if start >= duration or end > duration:
-            raise ValueError("burst window must be inside [0, duration]")
-        windows.append((start, end, rate))
-    segments, cursor = [], 0.0
-    for start, end, rate in sorted(windows):
-        if start < cursor:
-            raise ValueError("burst windows must not overlap")
-        if start > cursor:
-            segments.append({"start": cursor, "end": start, "session_rate": base})
-        segments.append({"start": start, "end": end, "session_rate": rate})
-        cursor = end
-    if cursor < duration:
-        segments.append({"start": cursor, "end": duration, "session_rate": base})
-    if any(not math.isfinite((s["end"] - s["start"]) * s["session_rate"]) for s in segments):
-        raise ValueError("integrated session rate is numerically out of range")
-    return segments
 
 
 def offer_times(rng, segments, arrival):

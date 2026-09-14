@@ -1,5 +1,5 @@
-"""Session-template LLM serving trace synthesis (Python standard library only)."""
+"""Configuration-driven LLM serving session synthesis."""
 
-from .generator import generate
+from .synthesis import generate
 
 __all__ = ["generate"]

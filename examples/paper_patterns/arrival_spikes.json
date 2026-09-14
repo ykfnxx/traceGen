@@ -1,0 +1,41 @@
+{
+  "version": 3,
+  "duration": 3600,
+  "seed": 42,
+  "block_size": 128,
+  "traffic": {
+    "session_rate": {
+      "points": [
+        [
+          0,
+          10
+        ],
+        [
+          171,
+          32
+        ]
+      ],
+      "interpolation": "previous",
+      "period": 180
+    },
+    "resolution": 300,
+    "arrival": {
+      "cv": 1
+    }
+  },
+  "tasks": [
+    {
+      "key": "requests",
+      "clients": {
+        "count": 1
+      },
+      "session": {
+        "requests": 1,
+        "initial_private_tokens": 256,
+        "output_tokens": 64,
+        "gap": 0
+      }
+    }
+  ],
+  "notes": "FineServe Fig4 comparison: manual 10 to 32 sessions/s step for last 9s of every 180s; single-request sessions. Same base intensity as Poisson baseline, different mean. Period, amplitude, rate and lengths are assumptions."
+}
