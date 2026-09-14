@@ -80,7 +80,10 @@ class WorkbenchTests(unittest.TestCase):
                     raise
             try:
                 with urlopen(root) as response:self.assertEqual(response.read(),b'workbench')
-                with urlopen(root+'/api/presets') as response:self.assertEqual(len(json.load(response)),7)
+                with urlopen(root+'/api/presets') as response:
+                    presets=json.load(response)
+                expected=1+len(list((Path(__file__).resolve().parents[1]/'examples/presets').glob('*.json')))
+                self.assertEqual(len(presets),expected)
                 with self.assertRaises(HTTPError) as error:post('run',{'config':{'version':2}})
                 self.assertEqual(error.exception.code,400)
                 result=post('run',{'config':config()})

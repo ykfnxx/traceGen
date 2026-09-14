@@ -1,0 +1,85 @@
+{
+  "version": 3,
+  "duration": 600,
+  "seed": 42,
+  "block_size": 128,
+  "notes": "串行数据分析工具循环；请求 mean=18 为人工设定，参考 Agentic AI Workload Characteristics 的数据分析多轮与长尾规律，不声称复现某个模型或生产统计。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。",
+  "traffic": {
+    "session_rate": 0.03,
+    "resolution": 1,
+    "arrival": {
+      "cv": 1
+    }
+  },
+  "prefix_groups": [
+    {
+      "key": "data_analysis_agent-system",
+      "tokens": 2048,
+      "scope": "task"
+    }
+  ],
+  "tasks": [
+    {
+      "key": "data_analysis_agent",
+      "weight": 0.75,
+      "clients": {
+        "count": 3
+      },
+      "arrival": {
+        "distribution": "gamma",
+        "cv": 1.2
+      },
+      "prefix_groups": [
+        {
+          "key": "data_analysis_agent-system"
+        }
+      ],
+      "session": {
+        "requests": {
+          "distribution": "lognormal",
+          "mean": 18,
+          "cv": 0.85,
+          "min": 1,
+          "max": 150
+        },
+        "initial_private_tokens": {
+          "distribution": "lognormal",
+          "mean": 2000,
+          "cv": 0.7,
+          "min": 1,
+          "max": 12000
+        },
+        "growth_multiplier": {
+          "distribution": "lognormal",
+          "mean": 1,
+          "cv": 0.35,
+          "min": 0.2,
+          "max": 3
+        },
+        "external_tokens": {
+          "distribution": "lognormal",
+          "mean": 1800,
+          "cv": 0.9,
+          "min": 1,
+          "max": 16000
+        },
+        "output_tokens": {
+          "distribution": "lognormal",
+          "mean": 400,
+          "cv": 0.7,
+          "min": 1,
+          "max": 4000
+        },
+        "gap": {
+          "distribution": "lognormal",
+          "mean": 8,
+          "cv": 1,
+          "min": 0.1,
+          "max": 180
+        },
+        "max_context_tokens": 262144
+      },
+      "notes": "串行数据分析工具循环；请求 mean=18 为人工设定，参考 Agentic AI Workload Characteristics 的数据分析多轮与长尾规律，不声称复现某个模型或生产统计。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。"
+    }
+  ]
+}

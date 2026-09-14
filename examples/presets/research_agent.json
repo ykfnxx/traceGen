@@ -1,0 +1,85 @@
+{
+  "version": 3,
+  "duration": 600,
+  "seed": 42,
+  "block_size": 128,
+  "notes": "DeerFlow 式串行搜索汇总；调用均值参考 XPerf Table 2 的 DeerFlow 14.7 calls/user task；较大外部新增为人工设定，不代表 ODR 并行研究。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。",
+  "traffic": {
+    "session_rate": 0.03,
+    "resolution": 1,
+    "arrival": {
+      "cv": 1
+    }
+  },
+  "prefix_groups": [
+    {
+      "key": "research_agent-system",
+      "tokens": 1536,
+      "scope": "task"
+    }
+  ],
+  "tasks": [
+    {
+      "key": "research_agent",
+      "weight": 0.75,
+      "clients": {
+        "count": 3
+      },
+      "arrival": {
+        "distribution": "gamma",
+        "cv": 1.2
+      },
+      "prefix_groups": [
+        {
+          "key": "research_agent-system"
+        }
+      ],
+      "session": {
+        "requests": {
+          "distribution": "lognormal",
+          "mean": 14.7,
+          "cv": 0.3,
+          "min": 1,
+          "max": 60
+        },
+        "initial_private_tokens": {
+          "distribution": "lognormal",
+          "mean": 1200,
+          "cv": 0.7,
+          "min": 1,
+          "max": 8000
+        },
+        "growth_multiplier": {
+          "distribution": "lognormal",
+          "mean": 1,
+          "cv": 0.35,
+          "min": 0.2,
+          "max": 3
+        },
+        "external_tokens": {
+          "distribution": "lognormal",
+          "mean": 6000,
+          "cv": 0.9,
+          "min": 1,
+          "max": 24000
+        },
+        "output_tokens": {
+          "distribution": "lognormal",
+          "mean": 700,
+          "cv": 0.7,
+          "min": 1,
+          "max": 5000
+        },
+        "gap": {
+          "distribution": "lognormal",
+          "mean": 12,
+          "cv": 1,
+          "min": 0.1,
+          "max": 180
+        },
+        "max_context_tokens": 262144
+      },
+      "notes": "DeerFlow 式串行搜索汇总；调用均值参考 XPerf Table 2 的 DeerFlow 14.7 calls/user task；较大外部新增为人工设定，不代表 ODR 并行研究。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。"
+    }
+  ]
+}

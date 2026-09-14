@@ -102,7 +102,7 @@ python3 preview.py
 
 ## 参考配置与实现边界
 
-[预设说明](examples/presets/README.md)包含 chat、coding agent、长 agent、头部 client、日周期与 burst 混合六组配置。
+[预设说明](examples/presets/README.md)包含 chat、coding agent、短流程问答、客服、串行研究、数据分析、长 agent、头部 client、日周期与 burst 混合配置。
 
 当前实现配置驱动核心、CLI、JSON 统计、静态曲线与交互编辑/对比工作台。压缩、分叉、重试、human turn 层级、并发准入和 serving 反馈也不在基础核心中。详见[重构设计](docs/config-driven-refactor.md)。
 

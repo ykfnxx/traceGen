@@ -1,6 +1,6 @@
 # 人工参考配置
 
-这些配置表达[设计文档](../../docs/config-driven-refactor.md#7-参考配置)列出的定性负载规律。除 `daily_mixed.json` 中注明的 Weka 主 agent 请求数参数外，均值、CV、长度、比例和峰谷时间均为人工假设。原文的客户端统计不被当成完整 serving 入口分布；各分布独立抽样并不声称还原真实联合分布。
+这些配置表达[设计文档](../../docs/config-driven-refactor.md#7-参考配置)列出的定性负载规律。除各预设注明的 Copilot 与 XPerf 调用数参考外，均值、CV、长度、比例和峰谷时间均为人工假设。原文的客户端统计不被当成完整 serving 入口分布；各分布独立抽样并不声称还原真实联合分布。
 
 | 配置 | 规律与人工设定 |
 |---|---|
@@ -8,7 +8,11 @@
 | [coding_agent.json](coding_agent.json) | 较密集的 LLM 调用，工具结果式外部新增，异质 session 增长倍率 |
 | [long_agent.json](long_agent.json) | 20/60/150 次调用，较大新增上下文，混合短间隔与长停顿 |
 | [head_clients.json](head_clients.json) | client 排名权重 `1/r^1.6`；集中度作用于 session 发起，不是硬性请求份额 |
-| [daily_mixed.json](daily_mixed.json) | 24 小时周期控制点，60 秒强度网格；Chat 与 coding 均使用随机整数轮数，coding 为 Weka 主 agent 参考长尾 |
+| [daily_mixed.json](daily_mixed.json) | 24 小时周期控制点，60 秒强度网格；Chat、Copilot coding 与四类 agent 混合；所有轮数均随机采样 |
+| [qa_agent.json](qa_agent.json) | LLMCompiler 式短流程问答的线性近似，少量调用 |
+| [customer_service_agent.json](customer_service_agent.json) | Tau-Bench 式客服查询和操作，小幅上下文增长 |
+| [research_agent.json](research_agent.json) | DeerFlow 式串行研究，较大的外部新增上下文 |
+| [data_analysis_agent.json](data_analysis_agent.json) | 数据分析工具循环，随机轮数与长尾间隔 |
 | [burst_mixed.json](burst_mixed.json) | 整体峰谷与全局 ramp burst；已有 session 自然产生拖尾 |
 
 Client 分解和异质性参考 ServeGen 的思路；任务属性差异、Agent 多轮与前缀复用、工具/用户停顿分别参考设计文档中的 FineServe、SMetric、Agentic Coding in the Wild 与 TraceLab；日周期是说明配置能力的人工场景。具体观测范围与单位应回到原论文核对，本目录不提供生产测量背书。
@@ -24,12 +28,32 @@ python3 experiments/run_synthetic.py --config examples/presets/coding_agent.json
 
 ## daily_mixed 的会话请求数
 
-参考本地原始文件 `G35/datasets/cc-traces-weka-061326/traces.jsonl`（未使用 `traces_modified.jsonl`），对应 [Weka 061326 数据集](https://huggingface.co/datasets/semianalysisai/cc-traces-weka-061326)。逐行统计顶层模型请求，排除包含 `requests` 的 subagent 分组，得到 183 条主 agent 流、26,648 次请求。请求数均值 145.6175、总体 CV 2.1205、P50 58、P95 412.8，范围 2–2555。发布过滤条件针对完整 session，不意味着主 agent 请求数至少为 20。
+Coding 参考 [Agentic Coding in the Wild，Table 4](https://arxiv.org/html/2608.00101v1#S4.SS2)：每 session 的 LLM calls 均值 40.6、中位数 15、P75 42.8、P90 100.5。这是 LLM 调用数，不是用户 turn 数。
 
-Coding 使用 `lognormal(mean=145.62, cv=2.121, min=1, max=2555)`。mean/CV 由上述样本矩直接换算并取有限小数，max 取观测最大值作为实验上界；并非迭代拟合。每个 session 独立抽样后取整，能生成上界内各整数，不再局限三档。生成时仅使用配置，不读取 Weka。Weka 为经过筛选的 coding session 样本，不能代表所有 coding 流量；subagent 分支没有拼接到当前线性上下文中。
+使用 `lognormal(mean=40.6, cv=2.5152, min=1, max=2555)`。CV 由 `sqrt((mean/median)^2-1)` 换算，非论文报告值；连续分布的 P90 约 91.5，单一 Lognormal 不会精确满足全部分位数。max=2555 为保留的实验保护上界，不是 Copilot 实测最大值。每个 session 独立抽样并取整，运行时不访问数据集或自动拟合。
 
-固定 seed=42 对该请求数分布直接抽样 100,000 次：均值约 141.94、P50 62、P95 535，得到 1,796 种不同整数请求数。clip 会改变均值并在上界产生少量质量；单一 Lognormal 仅近似长尾形状，未同时匹配全部分位数。
+Chat 使用 `lognormal(mean=4.2, cv=0.8, min=1, max=30)`，属于人工短会话设定。全部任务均设置 `max_context_tokens=262144`；下一次总输入超限时结束 session，不截断历史。实际计划轮数会低于部分原始抽样轮数；最终还受输出时间窗口限制。task 权重代表 session 发起份额，不是请求份额。
 
-Chat 使用 `lognormal(mean=4.2, cv=0.8, min=1, max=30)`，仍是人工短会话设定。两个任务都设置 `session.max_context_tokens=262144`，总输入包含公共前缀、历史和当前新增；下一请求将超限时结束 session。当前输出会在下一轮计入历史，本轮输出本身不属于当前输入上限。原始抽样轮数仍保留 Weka 参考长尾，但实际计划轮数会受上下文预算缩短，因此上面的轮数抽样统计不等于最终 trace 的轮数统计。
+日周期、client 分配、轮间间隔和增长/输出长度保持人工设定，不声称复现 Copilot 的联合分布。当前没有用户 turn 层级、压缩、模型切换或缓存淘汰，历史 block 复用机会不能直接当作论文的实际缓存命中率。
 
-任务权重和发起强度不变，原示例约 4.3 万请求/天的估算不再适用；实际总请求数还受上下文限制和时间窗口影响。本次仅验证 session 计划及边界，没有运行完整一天的 trace。当前不模拟 Weka 的压缩、重置或分支。
+## daily_mixed 的 agent 组成
+
+Coding 的整个 task（包括 weight=1、clients、长度和间隔）以及 coding-system 前缀保持 Copilot 调整后的配置；Chat 也保持原配置。整体日周期和 session 发起强度保持原值。加入任务会重新归一化各任务权重，因此 coding 的 session 到达频率和最终请求占比会变化。
+
+| task | session 权重 / 份额 | 请求数 mean / CV / max | gap 均值（秒） | 初始私有 / 外部新增 / 输出均值（token） |
+|---|---|---|---|---|
+| chat | 3 / 30% | 4.2 / 0.8 / 30 | 12 | 240 / 100 / 180 |
+| coding_agent | 1 / 10% | 40.6 / 2.5152 / 2555 | 2 | 1800 / 800 / 350 |
+| qa_agent | 3 / 30% | 2.4 / 0.8 / 12 | 2 | 600 / 1500 / 240 |
+| customer_service_agent | 1.5 / 15% | 14.9 / 0.45 / 80 | 6 | 400 / 180 / 160 |
+| research_agent | 0.75 / 7.5% | 14.7 / 0.3 / 60 | 12 | 1200 / 6000 / 700 |
+| data_analysis_agent | 0.75 / 7.5% | 18 / 0.85 / 150 | 8 | 2000 / 1800 / 400 |
+
+权重为人工混合场景，不是市场份额。表中为裁剪前分布参数；整数化、上下界裁剪、256k 上限和结束窗口都会影响实测均值。新增任务的请求数均使用 Lognormal，min=1；gap 也是连续 Lognormal，不用几个固定间隔代替随机性。新增任务的增长倍率为 session 级 Lognormal(mean=1, cv=0.35)，每轮新增再独立抽样。
+
+- [XPerf，Table 2 与 §5.2](https://arxiv.org/html/2608.20370v1#S5)：在 gpt-oss-120b 基准实验中，LLMCompiler、Tau-Bench、DeerFlow 每用户任务平均调用数分别为 2.4、14.9、14.7。本配置只引用这些均值和执行结构规律；CV、上限、token 长度、间隔和混合比例都是补充假设，未拟合论文 P95。
+- [Agentic AI Workload Characteristics，§4](https://arxiv.org/html/2605.26297v1#S4)：数据分析的轮数、上下文与重试长尾依赖模型和任务。数据分析预设的 mean=18、CV=0.85 是人工参考，不模拟工具失败状态。
+
+新增 task 的 session 表示一个用户任务的线性执行，Copilot coding session 则可涵盖多个用户 turn；这不是统一的产品会话口径。gap 是相邻 LLM 请求到达间隔，不能再叠加工具等待或推理耗时。首末请求时间差也不包含最后一次推理完成时间。
+
+当前不支持 session 内并行分支或汇总 DAG，因此没有加入 ODR/LATS/MagenticOne 的整任务多分支配置，也不把分支调用数累加到一条历史里。短问答仅是线性近似，研究任务明确采用串行结构。四个新增单任务预设与 daily_mixed 中对应 task 完全相同，可用前述 CLI 独立运行（600 秒、0.03 sessions/s）。

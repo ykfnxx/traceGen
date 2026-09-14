@@ -42,7 +42,7 @@ The React workbench edits global/task/client curves, bursts, distributions, pref
 
 ## Configuration
 
-Start with [config.example.json](examples/config.example.json). The [configuration reference](docs/configuration.md) documents every supported field, default and distribution parameterization. [Six presets](examples/presets/README.md) cover chat, coding agents, long agents, head clients, daily cycles and bursts.
+Start with [config.example.json](examples/config.example.json). The [configuration reference](docs/configuration.md) documents every supported field, default and distribution parameterization. [Presets](examples/presets/README.md) cover chat, coding, short Q&A, customer service, sequential research, data analysis, long agents, head clients, daily cycles and bursts.
 
 - `version: 3` selects pure configuration synthesis. `traffic.session_rate` is sessions/s, as a constant or a time curve. Request RPS emerges from multi-turn expansion.
 - Task and client weights are normalized separately. Local bursts and client activity act after allocation without suppressing other sources. Existing sessions retain their gaps.

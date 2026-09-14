@@ -1,0 +1,85 @@
+{
+  "version": 3,
+  "duration": 600,
+  "seed": 42,
+  "block_size": 128,
+  "notes": "短流程工具问答；调用均值参考 XPerf Table 2 的 LLMCompiler 2.4 calls/user task；线性短链近似，不模拟其执行 DAG。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。",
+  "traffic": {
+    "session_rate": 0.03,
+    "resolution": 1,
+    "arrival": {
+      "cv": 1
+    }
+  },
+  "prefix_groups": [
+    {
+      "key": "qa_agent-system",
+      "tokens": 1024,
+      "scope": "task"
+    }
+  ],
+  "tasks": [
+    {
+      "key": "qa_agent",
+      "weight": 3,
+      "clients": {
+        "count": 4
+      },
+      "arrival": {
+        "distribution": "gamma",
+        "cv": 1.2
+      },
+      "prefix_groups": [
+        {
+          "key": "qa_agent-system"
+        }
+      ],
+      "session": {
+        "requests": {
+          "distribution": "lognormal",
+          "mean": 2.4,
+          "cv": 0.8,
+          "min": 1,
+          "max": 12
+        },
+        "initial_private_tokens": {
+          "distribution": "lognormal",
+          "mean": 600,
+          "cv": 0.7,
+          "min": 1,
+          "max": 4000
+        },
+        "growth_multiplier": {
+          "distribution": "lognormal",
+          "mean": 1,
+          "cv": 0.35,
+          "min": 0.2,
+          "max": 3
+        },
+        "external_tokens": {
+          "distribution": "lognormal",
+          "mean": 1500,
+          "cv": 0.9,
+          "min": 1,
+          "max": 8000
+        },
+        "output_tokens": {
+          "distribution": "lognormal",
+          "mean": 240,
+          "cv": 0.7,
+          "min": 1,
+          "max": 1600
+        },
+        "gap": {
+          "distribution": "lognormal",
+          "mean": 2,
+          "cv": 1,
+          "min": 0.1,
+          "max": 20
+        },
+        "max_context_tokens": 262144
+      },
+      "notes": "短流程工具问答；调用均值参考 XPerf Table 2 的 LLMCompiler 2.4 calls/user task；线性短链近似，不模拟其执行 DAG。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。"
+    }
+  ]
+}

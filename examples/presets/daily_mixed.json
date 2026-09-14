@@ -3,7 +3,7 @@
   "duration": 86400,
   "seed": 42,
   "block_size": 128,
-  "notes": "24 小时人工混合负载；coding_agent 请求数参考本地 cc-traces-weka-061326 的 183 个主 agent 流，以均值/CV 参数化 Lognormal。其余比例、时序、长度为人工假设；生成时不读取数据集。 每次输入总上下文上限 262144 token；下一请求超限时结束 session。",
+  "notes": "24 小时人工混合负载；保留 Copilot coding 配置，加入短流程问答、客服、串行研究和数据分析。调用数参考及人工假设见各 task.notes 与 presets/README.md。权重是 session 发起份额；所有任务总输入上限 262144 token。仅线性上下文，不模拟并行分支、压缩或 serving 反馈。",
   "traffic": {
     "session_rate": {
       "points": [
@@ -43,6 +43,26 @@
     },
     {
       "key": "coding-system",
+      "tokens": 2048,
+      "scope": "task"
+    },
+    {
+      "key": "qa_agent-system",
+      "tokens": 1024,
+      "scope": "task"
+    },
+    {
+      "key": "customer_service_agent-system",
+      "tokens": 1536,
+      "scope": "task"
+    },
+    {
+      "key": "research_agent-system",
+      "tokens": 1536,
+      "scope": "task"
+    },
+    {
+      "key": "data_analysis_agent-system",
       "tokens": 2048,
       "scope": "task"
     }
@@ -122,8 +142,8 @@
       "session": {
         "requests": {
           "distribution": "lognormal",
-          "mean": 145.62,
-          "cv": 2.121,
+          "mean": 40.6,
+          "cv": 2.5152,
           "min": 1,
           "max": 2555
         },
@@ -161,7 +181,255 @@
         },
         "max_context_tokens": 262144
       },
-      "notes": "请求数参考 Weka 061326 主 agent 请求（不含 subagent）：均值 145.6175、CV 2.1205、P50 58、P95 412.8、最大 2555。max 是实验 clip 上界，不是生产硬限制；其他 session 参数仍为人工假设。"
+      "notes": "Agentic Coding in the Wild (2608.00101v1), Table 4: LLM calls/session mean=40.6, median=15, P75=42.8, P90=100.5. cv=sqrt((40.6/15)^2-1) is a derived Lognormal parameter, not a reported CV. max=2555 remains an experimental safety bound; 256k context limit can reduce realized counts."
+    },
+    {
+      "key": "qa_agent",
+      "weight": 3,
+      "clients": {
+        "count": 4
+      },
+      "arrival": {
+        "distribution": "gamma",
+        "cv": 1.2
+      },
+      "prefix_groups": [
+        {
+          "key": "qa_agent-system"
+        }
+      ],
+      "session": {
+        "requests": {
+          "distribution": "lognormal",
+          "mean": 2.4,
+          "cv": 0.8,
+          "min": 1,
+          "max": 12
+        },
+        "initial_private_tokens": {
+          "distribution": "lognormal",
+          "mean": 600,
+          "cv": 0.7,
+          "min": 1,
+          "max": 4000
+        },
+        "growth_multiplier": {
+          "distribution": "lognormal",
+          "mean": 1,
+          "cv": 0.35,
+          "min": 0.2,
+          "max": 3
+        },
+        "external_tokens": {
+          "distribution": "lognormal",
+          "mean": 1500,
+          "cv": 0.9,
+          "min": 1,
+          "max": 8000
+        },
+        "output_tokens": {
+          "distribution": "lognormal",
+          "mean": 240,
+          "cv": 0.7,
+          "min": 1,
+          "max": 1600
+        },
+        "gap": {
+          "distribution": "lognormal",
+          "mean": 2,
+          "cv": 1,
+          "min": 0.1,
+          "max": 20
+        },
+        "max_context_tokens": 262144
+      },
+      "notes": "短流程工具问答；调用均值参考 XPerf Table 2 的 LLMCompiler 2.4 calls/user task；线性短链近似，不模拟其执行 DAG。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。"
+    },
+    {
+      "key": "customer_service_agent",
+      "weight": 1.5,
+      "clients": {
+        "count": 4
+      },
+      "arrival": {
+        "distribution": "gamma",
+        "cv": 1.2
+      },
+      "prefix_groups": [
+        {
+          "key": "customer_service_agent-system"
+        }
+      ],
+      "session": {
+        "requests": {
+          "distribution": "lognormal",
+          "mean": 14.9,
+          "cv": 0.45,
+          "min": 1,
+          "max": 80
+        },
+        "initial_private_tokens": {
+          "distribution": "lognormal",
+          "mean": 400,
+          "cv": 0.7,
+          "min": 1,
+          "max": 3000
+        },
+        "growth_multiplier": {
+          "distribution": "lognormal",
+          "mean": 1,
+          "cv": 0.35,
+          "min": 0.2,
+          "max": 3
+        },
+        "external_tokens": {
+          "distribution": "lognormal",
+          "mean": 180,
+          "cv": 0.9,
+          "min": 1,
+          "max": 2000
+        },
+        "output_tokens": {
+          "distribution": "lognormal",
+          "mean": 160,
+          "cv": 0.7,
+          "min": 1,
+          "max": 1200
+        },
+        "gap": {
+          "distribution": "lognormal",
+          "mean": 6,
+          "cv": 1,
+          "min": 0.1,
+          "max": 90
+        },
+        "max_context_tokens": 262144
+      },
+      "notes": "客服查询与业务操作；调用均值参考 XPerf Table 2 的 Tau-Bench 14.9 calls/user task；不模拟用户 turn 或数据库执行反馈。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。"
+    },
+    {
+      "key": "research_agent",
+      "weight": 0.75,
+      "clients": {
+        "count": 3
+      },
+      "arrival": {
+        "distribution": "gamma",
+        "cv": 1.2
+      },
+      "prefix_groups": [
+        {
+          "key": "research_agent-system"
+        }
+      ],
+      "session": {
+        "requests": {
+          "distribution": "lognormal",
+          "mean": 14.7,
+          "cv": 0.3,
+          "min": 1,
+          "max": 60
+        },
+        "initial_private_tokens": {
+          "distribution": "lognormal",
+          "mean": 1200,
+          "cv": 0.7,
+          "min": 1,
+          "max": 8000
+        },
+        "growth_multiplier": {
+          "distribution": "lognormal",
+          "mean": 1,
+          "cv": 0.35,
+          "min": 0.2,
+          "max": 3
+        },
+        "external_tokens": {
+          "distribution": "lognormal",
+          "mean": 6000,
+          "cv": 0.9,
+          "min": 1,
+          "max": 24000
+        },
+        "output_tokens": {
+          "distribution": "lognormal",
+          "mean": 700,
+          "cv": 0.7,
+          "min": 1,
+          "max": 5000
+        },
+        "gap": {
+          "distribution": "lognormal",
+          "mean": 12,
+          "cv": 1,
+          "min": 0.1,
+          "max": 180
+        },
+        "max_context_tokens": 262144
+      },
+      "notes": "DeerFlow 式串行搜索汇总；调用均值参考 XPerf Table 2 的 DeerFlow 14.7 calls/user task；较大外部新增为人工设定，不代表 ODR 并行研究。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。"
+    },
+    {
+      "key": "data_analysis_agent",
+      "weight": 0.75,
+      "clients": {
+        "count": 3
+      },
+      "arrival": {
+        "distribution": "gamma",
+        "cv": 1.2
+      },
+      "prefix_groups": [
+        {
+          "key": "data_analysis_agent-system"
+        }
+      ],
+      "session": {
+        "requests": {
+          "distribution": "lognormal",
+          "mean": 18,
+          "cv": 0.85,
+          "min": 1,
+          "max": 150
+        },
+        "initial_private_tokens": {
+          "distribution": "lognormal",
+          "mean": 2000,
+          "cv": 0.7,
+          "min": 1,
+          "max": 12000
+        },
+        "growth_multiplier": {
+          "distribution": "lognormal",
+          "mean": 1,
+          "cv": 0.35,
+          "min": 0.2,
+          "max": 3
+        },
+        "external_tokens": {
+          "distribution": "lognormal",
+          "mean": 1800,
+          "cv": 0.9,
+          "min": 1,
+          "max": 16000
+        },
+        "output_tokens": {
+          "distribution": "lognormal",
+          "mean": 400,
+          "cv": 0.7,
+          "min": 1,
+          "max": 4000
+        },
+        "gap": {
+          "distribution": "lognormal",
+          "mean": 8,
+          "cv": 1,
+          "min": 0.1,
+          "max": 180
+        },
+        "max_context_tokens": 262144
+      },
+      "notes": "串行数据分析工具循环；请求 mean=18 为人工设定，参考 Agentic AI Workload Characteristics 的数据分析多轮与长尾规律，不声称复现某个模型或生产统计。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。"
     }
   ]
 }
