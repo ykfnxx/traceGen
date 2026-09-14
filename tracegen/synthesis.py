@@ -45,6 +45,9 @@ class Session:
         self.seed = seed
         self.plan = []
         offset, tokens, external, previous_output = 0.0, public + private, private, 0
+        context_limit = task["max_context_tokens"]
+        if context_limit is not None and tokens > context_limit:
+            raise ValueError(f"{task['key']}: initial input exceeds max_context_tokens")
         for index in range(count):
             if index:
                 offset += p["gap"].sample(streams["timing"])
@@ -53,6 +56,8 @@ class Session:
                     raise ValueError("session token growth out of range")
                 external = int(math.floor(increment + .5))
                 tokens += previous_output + external
+                if context_limit is not None and tokens > context_limit:
+                    break
             output = p["output_tokens"].sample(streams["output"])
             if not math.isfinite(start + offset):
                 raise ValueError("session timestamp out of range")
@@ -61,10 +66,12 @@ class Session:
             previous_output = output
         self.metadata = dict(session_id=self.id, task=task["key"], client=client.key,
                              ordinal=ordinal, session_seed=str(seed), start=start,
-                             end=self.plan[-1]["timestamp"], planned_requests=count,
+                             end=self.plan[-1]["timestamp"], planned_requests=len(self.plan),
                              emitted_requests=0, initial_private_tokens=private,
                              growth_multiplier=multiplier,
                              prefix_group=group["key"] if group else None, public_prefix_tokens=public)
+        if context_limit is not None:
+            self.metadata.update(sampled_requests=count, context_limited=len(self.plan) < count)
 
     def requests(self, duration):
         hashes = []

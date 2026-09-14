@@ -123,7 +123,8 @@ CV 是每个 client 的积分时钟间隔 CV，不是服务端总 IAT 或窗口�
 
 | 字段 | 默认值 | 采样频次和单位 |
 |---|---|---|
-| `requests` | 必填 | 每个 session 一次，LLM 请求数，整数 >=1 |
+| `requests` | 必填 | 每个 session 一次，目标 LLM 请求数，整数 >=1 |
+| `max_context_tokens` | 无限制 | 可选正整数，每次请求的总输入 token 上限；下一次输入超限时结束 session |
 | `initial_private_tokens` | 必填 | 每个 session 一次，初始私有 token 数 |
 | `growth_multiplier` | `1` | 每个 session 一次，非负倍率 |
 | `external_tokens` | `0` | 后续每次请求，外部新 token 数（不含模型输出） |
@@ -179,7 +180,9 @@ arrival_seed = stable_seed(global_seed, task_key, client_key, "arrival-v1")
 
 关闭请求 metadata 时仍计算到达和 block 复用统计，token/请求序号图不可用；不从 block 数猜测完整 token 长度。图表设置不进入生成配置、不消耗生成随机流。
 
-当前无自动拟合、在线 serving 反馈、最大上下文截断或压缩。长 session 可以持续增长；通过配置轮数及增量分布的上界控制实验规模。
+`max_context_tokens` 包含公共前缀、私有历史及本轮新增，不包含本轮尚未生成的输出。下一轮输入超过上限时，不再发出该请求并结束 session；不截断 token、不破坏已有前缀。首请求已经超限则报错，应调整初始长度分布。设置上限时，manifest 的 `sampled_requests` 是原始抽样轮数，`planned_requests` 是上下文限制后的计划轮数，`context_limited` 表示是否因上下文提前结束；`emitted_requests` 再受 trace 时间窗口限制。
+
+当前无自动拟合、在线 serving 反馈或上下文压缩。未设上限时长 session 可以持续增长。
 
 
 ## 交互编辑与导出

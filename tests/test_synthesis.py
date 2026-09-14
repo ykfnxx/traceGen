@@ -50,6 +50,26 @@ class Synthesis(unittest.TestCase):
         rows = list(self.session(c).requests(10))
         self.assertEqual([len(r["hash_ids"]) for r in rows], [0, 0, 0, 1, 1])
 
+    def test_context_limit_preserves_history_and_counts(self):
+        c = config()
+        c['tasks'][0]['session']['max_context_tokens'] = 9
+        session = self.session(c)
+        rows = list(session.requests(10))
+        self.assertEqual([r['input_tokens'] for r in rows], [6, 9])
+        self.assertEqual(rows[1]['hash_ids'][:1], rows[0]['hash_ids'])
+        self.assertEqual(session.metadata['sampled_requests'], 3)
+        self.assertEqual(session.metadata['planned_requests'], 2)
+        self.assertTrue(session.metadata['context_limited'])
+        c['tasks'][0]['session']['max_context_tokens'] = 12
+        self.assertEqual(len(self.session(c).plan), 3)
+        self.assertFalse(self.session(c).metadata['context_limited'])
+        c['tasks'][0]['session']['max_context_tokens'] = 5
+        with self.assertRaisesRegex(ValueError, 'initial input exceeds'):
+            self.session(c)
+        c['tasks'][0]['session']['max_context_tokens'] = 0
+        with self.assertRaises(ValueError):
+            ClientPool(c)
+
     def test_group_scope_and_private_isolation(self):
         for scope, shared in [("task", True), ("global", True), ("client", False)]:
             c = config(); c["prefix_groups"][0]["scope"] = scope

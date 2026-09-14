@@ -3,7 +3,7 @@
   "duration": 86400,
   "seed": 42,
   "block_size": 128,
-  "notes": "人工构造的参考参数，用于展示聊天与 Agent 规律；不是论文实测或校准结果。",
+  "notes": "24 小时人工混合负载；coding_agent 请求数参考本地 cc-traces-weka-061326 的 183 个主 agent 流，以均值/CV 参数化 Lognormal。其余比例、时序、长度为人工假设；生成时不读取数据集。 每次输入总上下文上限 262144 token；下一请求超限时结束 session。",
   "traffic": {
     "session_rate": {
       "points": [
@@ -61,19 +61,11 @@
       ],
       "session": {
         "requests": {
-          "distribution": "discrete",
-          "values": [
-            1,
-            3,
-            6,
-            10
-          ],
-          "weights": [
-            0.2,
-            0.4,
-            0.3,
-            0.1
-          ]
+          "distribution": "lognormal",
+          "mean": 4.2,
+          "cv": 0.8,
+          "min": 1,
+          "max": 30
         },
         "initial_private_tokens": {
           "distribution": "lognormal",
@@ -106,8 +98,10 @@
           "cv": 1,
           "min": 0.1,
           "max": 120
-        }
-      }
+        },
+        "max_context_tokens": 262144
+      },
+      "notes": "Chat 轮数采用人工短会话 Lognormal，mean=4.2、cv=0.8；不是 Weka 测量。"
     },
     {
       "key": "coding_agent",
@@ -127,17 +121,11 @@
       ],
       "session": {
         "requests": {
-          "distribution": "discrete",
-          "values": [
-            4,
-            12,
-            30
-          ],
-          "weights": [
-            0.3,
-            0.5,
-            0.2
-          ]
+          "distribution": "lognormal",
+          "mean": 145.62,
+          "cv": 2.121,
+          "min": 1,
+          "max": 2555
         },
         "initial_private_tokens": {
           "distribution": "lognormal",
@@ -170,8 +158,10 @@
           "cv": 1,
           "min": 0.02,
           "max": 30
-        }
-      }
+        },
+        "max_context_tokens": 262144
+      },
+      "notes": "请求数参考 Weka 061326 主 agent 请求（不含 subagent）：均值 145.6175、CV 2.1205、P50 58、P95 412.8、最大 2555。max 是实验 clip 上界，不是生产硬限制；其他 session 参数仍为人工假设。"
     }
   ]
 }

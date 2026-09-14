@@ -75,7 +75,10 @@ class ClientPool:
             weight = Curve(spec.get("weight", 1), name + ".weight")
             bursts = Bursts(spec.get("bursts", []), self.duration, name + ".bursts")
             profile = spec.get("session", {})
-            fields(profile, "requests initial_private_tokens growth_multiplier external_tokens output_tokens gap", name + ".session")
+            fields(profile, "requests initial_private_tokens growth_multiplier external_tokens output_tokens gap max_context_tokens", name + ".session")
+            context_limit = profile.get("max_context_tokens")
+            if context_limit is not None:
+                integer(context_limit, name + ".session.max_context_tokens", 1)
             distributions = {}
             defaults = {"growth_multiplier": 1, "external_tokens": 0, "output_tokens": 0}
             for field in ("requests", "initial_private_tokens", "growth_multiplier", "external_tokens", "output_tokens", "gap"):
@@ -93,7 +96,7 @@ class ClientPool:
             if choices:
                 positive(sum(c.get("weight", 1) for c in choices), name + ".prefix_group.total_weight")
             task = dict(key=name, weight=weight, bursts=bursts, profile=distributions,
-                        prefix_groups=choices, clients=[])
+                        prefix_groups=choices, clients=[], max_context_tokens=context_limit)
             curves.extend([weight, bursts])
             client_specs = spec.get("clients", {"count": 1})
             if isinstance(client_specs, dict):
