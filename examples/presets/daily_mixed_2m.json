@@ -3,7 +3,7 @@
   "duration": 86400,
   "seed": 42,
   "block_size": 128,
-  "notes": "24 小时高负载混合场景；三个 session 到达强度平台为 02–07、09–15、17–22 小时，其间平滑过渡到中等负载。Session 发起使用 Gamma CV=0.7，保留随机波动；80 token/s 下按下一请求输入增量定义输出估算 running。任务间隔参数与 token 配置见 task.notes。所有任务总输入上限 262144 token；不模拟 serving 反馈。",
+  "notes": "24 小时高负载混合场景；三个 session 到达强度平台为 02–07、09–15、17–22 小时，其间平滑过渡到中等负载。Session 发起使用 Gamma CV=0.7，保留随机波动；上下文新增包含模型输出及工具或用户输入，不用于按固定解码速度推断并发或校验重叠。任务间隔参数与 token 配置见 task.notes。所有任务总输入上限 262144 token；不模拟 serving 反馈。",
   "traffic": {
     "session_rate": {
       "points": [
@@ -233,24 +233,24 @@
           "components": [
             {
               "distribution": "lognormal",
-              "mean": 36.24103077982729,
+              "mean": 14.496412311930916,
               "cv": 0.6653104578694125
             },
             {
               "distribution": "lognormal",
-              "mean": 232.76765355371,
+              "mean": 93.107061421484,
               "cv": 1.6632578317112945
             },
             {
               "distribution": "lognormal",
-              "mean": 11551.964673933893,
+              "mean": 4620.785869573558,
               "cv": 9.36259822503716
             }
           ]
         },
         "max_context_tokens": 262144
       },
-      "notes": "Agentic Coding in the Wild (2608.00101v1), Table 4: LLM calls/session mean=40.6, median=15, P75=42.8, P90=100.5. cv=sqrt((40.6/15)^2-1) is a derived Lognormal parameter, not a reported CV. max=2555 remains an experimental safety bound; 256k context limit can reduce realized counts. Gap: three-component Lognormal mixture fitted offline to 26465 main-chain start-to-start gaps in Weka 061326 (183 selected sessions). No 30s cap; no extra response/tool duration is added. Components are statistical, not labeled human/tool states. 按新增量等于输出量的定义，为满足每请求 80 token/s 下约 90% 相邻请求不重叠，所有 gap 分量 mean 乘以 2.5；权重/CV 不变。该时间尺度经独立 seed 样本检查，不是原始论文或数据集拟合值；不保证零冲突，也未包含 prefill。"
+      "notes": "Agentic Coding in the Wild (2608.00101v1), Table 4: LLM calls/session mean=40.6, median=15, P75=42.8, P90=100.5. cv=sqrt((40.6/15)^2-1) is a derived Lognormal parameter, not a reported CV. max=2555 remains an experimental safety bound; 256k context limit can reduce realized counts. Gap: three-component Lognormal mixture fitted offline to 26465 main-chain start-to-start gaps in Weka 061326 (183 selected sessions). No 30s cap; no extra response/tool duration is added. Components are statistical, not labeled human/tool states."
     },
     {
       "key": "qa_agent",
@@ -313,24 +313,24 @@
           "components": [
             {
               "distribution": "lognormal",
-              "mean": 57.300000000000004,
+              "mean": 3,
               "cv": 0.6
             },
             {
               "distribution": "lognormal",
-              "mean": 286.5,
+              "mean": 15,
               "cv": 1
             },
             {
               "distribution": "lognormal",
-              "mean": 2292.0,
+              "mean": 120,
               "cv": 1.5
             }
           ]
         },
         "max_context_tokens": 262144
       },
-      "notes": "短流程工具问答；调用均值参考 XPerf Table 2 的 LLMCompiler 2.4 calls/user task；线性短链近似，不模拟其执行 DAG。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。 Gap 为三个连续 Lognormal 的人工参考混合，依据多时间尺度规律而非实测间隔拟合；权重、mean、CV 均为补充假设，依据及局限见 docs/task-gap-mixtures.md。 每次独立选择分量再随机采样，无固定间隔或 min/max 裁剪；不模拟阶段转移。 按新增量等于输出量的定义，为满足每请求 80 token/s 下约 90% 相邻请求不重叠，所有 gap 分量 mean 乘以 19.1；权重/CV 不变。该时间尺度经独立 seed 样本检查，不是原始论文或数据集拟合值；不保证零冲突，也未包含 prefill。"
+      "notes": "短流程工具问答；调用均值参考 XPerf Table 2 的 LLMCompiler 2.4 calls/user task；线性短链近似，不模拟其执行 DAG。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。 Gap 为三个连续 Lognormal 的人工参考混合，依据多时间尺度规律而非实测间隔拟合；权重、mean、CV 均为补充假设，依据及局限见 docs/task-gap-mixtures.md。 每次独立选择分量再随机采样，无固定间隔或 min/max 裁剪；不模拟阶段转移。"
     },
     {
       "key": "customer_service_agent",
@@ -393,24 +393,24 @@
           "components": [
             {
               "distribution": "lognormal",
-              "mean": 12.0,
+              "mean": 6,
               "cv": 0.8
             },
             {
               "distribution": "lognormal",
-              "mean": 150.0,
+              "mean": 75,
               "cv": 1
             },
             {
               "distribution": "lognormal",
-              "mean": 1200.0,
+              "mean": 600,
               "cv": 1.5
             }
           ]
         },
         "max_context_tokens": 262144
       },
-      "notes": "客服查询与业务操作；调用均值参考 XPerf Table 2 的 Tau-Bench 14.9 calls/user task；不模拟用户 turn 或数据库执行反馈。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。 Gap 为三个连续 Lognormal 的人工参考混合，依据多时间尺度规律而非实测间隔拟合；权重、mean、CV 均为补充假设，依据及局限见 docs/task-gap-mixtures.md。 每次独立选择分量再随机采样，无固定间隔或 min/max 裁剪；不模拟阶段转移。 按新增量等于输出量的定义，为满足每请求 80 token/s 下约 90% 相邻请求不重叠，所有 gap 分量 mean 乘以 2；权重/CV 不变。该时间尺度经独立 seed 样本检查，不是原始论文或数据集拟合值；不保证零冲突，也未包含 prefill。"
+      "notes": "客服查询与业务操作；调用均值参考 XPerf Table 2 的 Tau-Bench 14.9 calls/user task；不模拟用户 turn 或数据库执行反馈。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。 Gap 为三个连续 Lognormal 的人工参考混合，依据多时间尺度规律而非实测间隔拟合；权重、mean、CV 均为补充假设，依据及局限见 docs/task-gap-mixtures.md。 每次独立选择分量再随机采样，无固定间隔或 min/max 裁剪；不模拟阶段转移。"
     },
     {
       "key": "research_agent",
@@ -473,24 +473,24 @@
           "components": [
             {
               "distribution": "lognormal",
-              "mean": 159.60000000000002,
+              "mean": 12,
               "cv": 0.6
             },
             {
               "distribution": "lognormal",
-              "mean": 798.0,
+              "mean": 60,
               "cv": 1
             },
             {
               "distribution": "lognormal",
-              "mean": 3990.0,
+              "mean": 300,
               "cv": 1.5
             }
           ]
         },
         "max_context_tokens": 262144
       },
-      "notes": "DeerFlow 式串行搜索汇总；调用均值参考 XPerf Table 2 的 DeerFlow 14.7 calls/user task；较大外部新增为人工设定，不代表 ODR 并行研究。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。 Gap 为三个连续 Lognormal 的人工参考混合，依据多时间尺度规律而非实测间隔拟合；权重、mean、CV 均为补充假设，依据及局限见 docs/task-gap-mixtures.md。 每次独立选择分量再随机采样，无固定间隔或 min/max 裁剪；不模拟阶段转移。 按新增量等于输出量的定义，为满足每请求 80 token/s 下约 90% 相邻请求不重叠，所有 gap 分量 mean 乘以 13.3；权重/CV 不变。该时间尺度经独立 seed 样本检查，不是原始论文或数据集拟合值；不保证零冲突，也未包含 prefill。"
+      "notes": "DeerFlow 式串行搜索汇总；调用均值参考 XPerf Table 2 的 DeerFlow 14.7 calls/user task；较大外部新增为人工设定，不代表 ODR 并行研究。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。 Gap 为三个连续 Lognormal 的人工参考混合，依据多时间尺度规律而非实测间隔拟合；权重、mean、CV 均为补充假设，依据及局限见 docs/task-gap-mixtures.md。 每次独立选择分量再随机采样，无固定间隔或 min/max 裁剪；不模拟阶段转移。"
     },
     {
       "key": "data_analysis_agent",
@@ -553,24 +553,24 @@
           "components": [
             {
               "distribution": "lognormal",
-              "mean": 71.2,
+              "mean": 8,
               "cv": 0.7
             },
             {
               "distribution": "lognormal",
-              "mean": 400.5,
+              "mean": 45,
               "cv": 1
             },
             {
               "distribution": "lognormal",
-              "mean": 2136.0,
+              "mean": 240,
               "cv": 1.5
             }
           ]
         },
         "max_context_tokens": 262144
       },
-      "notes": "串行数据分析工具循环；请求 mean=18 为人工设定，参考 Agentic AI Workload Characteristics 的数据分析多轮与长尾规律，不声称复现某个模型或生产统计。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。 Gap 为三个连续 Lognormal 的人工参考混合，依据多时间尺度规律而非实测间隔拟合；权重、mean、CV 均为补充假设，依据及局限见 docs/task-gap-mixtures.md。 每次独立选择分量再随机采样，无固定间隔或 min/max 裁剪；不模拟阶段转移。 按新增量等于输出量的定义，为满足每请求 80 token/s 下约 90% 相邻请求不重叠，所有 gap 分量 mean 乘以 8.9；权重/CV 不变。该时间尺度经独立 seed 样本检查，不是原始论文或数据集拟合值；不保证零冲突，也未包含 prefill。"
+      "notes": "串行数据分析工具循环；请求 mean=18 为人工设定，参考 Agentic AI Workload Characteristics 的数据分析多轮与长尾规律，不声称复现某个模型或生产统计。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。 Gap 为三个连续 Lognormal 的人工参考混合，依据多时间尺度规律而非实测间隔拟合；权重、mean、CV 均为补充假设，依据及局限见 docs/task-gap-mixtures.md。 每次独立选择分量再随机采样，无固定间隔或 min/max 裁剪；不模拟阶段转移。"
     }
   ]
 }
