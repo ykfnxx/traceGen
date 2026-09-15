@@ -12,6 +12,7 @@ from tracegen.synthesis import generate
 from tracegen.profiles import Curve, Distribution
 from tracegen.synthesis import Session
 from tracegen.analysis import analyze
+from tracegen.running import estimate_running
 from experiments.run_synthetic import run_config
 
 
@@ -27,6 +28,29 @@ def config():
 
 
 class Synthesis(unittest.TestCase):
+    def test_running_estimate_time_weighting_and_conflicts(self):
+        result = estimate_running([(0, 's', 100), (1, 's', 100)], 5, 2)
+        self.assertEqual([s['tokens_per_second_per_request'] for s in result['scenarios']], [50, 80, 100])
+        scenario = result['scenarios'][0]  # 50 tokens/s: [0,2), [1,3)
+        self.assertEqual(scenario['pmf'], [[0, .4], [1, .4], [2, .2]])
+        self.assertAlmostEqual(scenario['mean'], .8)
+        self.assertEqual([scenario[k] for k in ('p50', 'p95', 'p99', 'peak')], [1, 2, 2, 2])
+        self.assertEqual(scenario['window_means'], [1.5, .5, 0])
+        self.assertEqual(scenario['conflict_fraction'], 1)
+        # Exact end/start ties, zero-length work and window truncation.
+        scenario = estimate_running([(0, 's', 100), (2, 's', 0), (4, 's', 100)], 5, 2)['scenarios'][0]
+        self.assertEqual(scenario['pmf'], [[0, .4], [1, .6]])
+        self.assertEqual(scenario['conflict_fraction'], 0)
+        self.assertEqual(scenario['still_running_at_end'], 1)
+        empty = estimate_running([], 5, 2)['scenarios'][0]
+        self.assertEqual(empty['pmf'], [[0, 1]])
+        self.assertIsNone(empty['conflict_fraction'])
+        # Each delta-derived output has its own known next arrival, including
+        # the final adjacent pair even though the final request is excluded.
+        scenario = estimate_running([(0, 's', 100)], 5, 2, [1])['scenarios'][0]
+        self.assertEqual(scenario['adjacent_pairs'], 1)
+        self.assertEqual(scenario['conflict_count'], 1)
+
     def run_trace(self, cfg, suffix=".jsonl"):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / ("trace" + suffix)
@@ -192,6 +216,42 @@ class Synthesis(unittest.TestCase):
         d = Distribution(dict(distribution="gamma", mean=10, cv=0, min=1, max=3), "test", count=True)
         self.assertEqual(d.sample(None), 3)
 
+    def test_mixture_sampling_and_validation(self):
+        import random
+        spec = dict(distribution="mixture", weights=[3, 1], components=[
+            dict(distribution="gamma", mean=2, cv=0),
+            dict(distribution="lognormal", mean=600, cv=0)])
+        d = Distribution(spec, "gap")
+        def samples():
+            rng = random.Random(42)
+            return [d.sample(rng) for _ in range(10000)]
+        values = samples()
+        self.assertEqual(values, samples())
+        self.assertEqual(set(values), {2, 600})
+        self.assertAlmostEqual(values.count(600)/len(values), .25, delta=.02)
+        for bad in [dict(distribution="mixture", components=[]),
+                    dict(spec, weights=[1]), dict(spec, weights=[0, 0]),
+                    dict(spec, weights=[1, -1]),
+                    dict(distribution="mixture", components=[spec])]:
+            with self.subTest(spec=bad), self.assertRaises(ValueError):
+                Distribution(bad, "gap")
+        with self.assertRaises(ValueError):
+            Distribution(dict(distribution="mixture", components=[0]), "requests", count=True, minimum=1)
+
+    def test_long_mixture_gaps_preserve_history_and_window(self):
+        c = config()
+        baseline = list(self.session(c).requests(2000))
+        c["tasks"][0]["session"]["gap"] = dict(
+            distribution="mixture", weights=[0, 1], components=[1, 600])
+        session = self.session(c)
+        rows = list(session.requests(2000))
+        self.assertEqual([r["timestamp"] for r in rows], [0, 600, 1200])
+        self.assertEqual([r["hash_ids"] for r in rows], [r["hash_ids"] for r in baseline])
+        session = self.session(c)
+        self.assertEqual(len(list(session.requests(1000))), 2)
+        self.assertEqual(session.metadata["planned_requests"], 3)
+        self.assertEqual(session.metadata["emitted_requests"], 2)
+
     def test_statistics_and_window_do_not_change_trace(self):
         c = config(); c["duration"] = 3
         with tempfile.TemporaryDirectory() as tmp:
@@ -207,10 +267,15 @@ class Synthesis(unittest.TestCase):
             self.assertEqual(a["historical_prefix_reuse"]["within_session_blocks"], 1)
             self.assertEqual(a["historical_prefix_reuse"]["extra_cross_session_blocks"], 1)
             self.assertEqual([v["samples"] for v in a["context_by_request"]], [2, 1])
+            self.assertEqual(a['estimated_running_requests']['estimated_requests'], 1)
+            self.assertEqual(a['estimated_running_requests']['excluded_last_requests'], 2)
+            for one, two in zip(a['estimated_running_requests']['scenarios'], b['estimated_running_requests']['scenarios']):
+                self.assertEqual(one['pmf'], two['pmf'])
             c["output"] = {"request_metadata": False}
             manifest = generate(c, Path(tmp) / "minimal.jsonl")
             minimal = analyze(Path(tmp) / "minimal.jsonl", manifest)
             self.assertFalse(minimal["request_metadata"])
+            self.assertIsNone(minimal['estimated_running_requests'])
             self.assertEqual(minimal["context_by_request"], [])
             self.assertEqual(minimal["historical_prefix_reuse"], a["historical_prefix_reuse"])
 

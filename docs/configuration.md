@@ -142,6 +142,17 @@ CV 是每个 client 的积分时钟间隔 CV，不是服务端总 IAT 或窗口�
 
 Gamma/Lognormal 的 mean 必须为正，CV 默认 1，CV=0 退化为 mean。`min/max` 仅适用于这两类分布，采用 **clip** 而非拒绝重采样；默认 min 为 0（requests 为 1），max 不限。因此配置 mean/CV 描述 clip 和整数化之前的分布，不保证最终样本保留相同均值/CV。
 
+`mixture` 支持有限混合分布：
+
+```json
+{"distribution":"mixture","weights":[0.9,0.1],"components":[
+  {"distribution":"lognormal","mean":15,"cv":0.7},
+  {"distribution":"lognormal","mean":600,"cv":2}
+]}
+```
+
+每次 sample 先按相对权重选择分量，再使用同一字段 RNG 从该分量抽样。weights 默认均匀，必须匹配非空 components，非负且总和大于零；不支持嵌套 mixture。min/max 写在分量内部，整数与最小值约束继承外层字段。混合权重不是 session 占比，也不自动产生有状态的用户 turn 分段。上述参数仅为语法示例。`arrival` 的 renewal 分布不支持 mixture；session.gap 可以使用它。
+
 请求数、初始/外部/输出 token 数采用 `floor(x+0.5)` 整数化；它们的 fixed/discrete 值及 min/max 必须是整数。Growth multiplier 和 gap 保留浮点。外部 token 样本先整数化，再乘 session 增长倍率并再次 `floor(x+0.5)`。
 
 ```text

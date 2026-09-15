@@ -44,6 +44,8 @@ The React workbench edits global/task/client curves, bursts, distributions, pref
 
 Start with [config.example.json](examples/config.example.json). The [configuration reference](docs/configuration.md) documents every supported field, default and distribution parameterization. [Presets](examples/presets/README.md) cover chat, coding, short Q&A, customer service, sequential research, data analysis, long agents, head clients, daily cycles and bursts.
 
+The daily coding profile uses a Weka-derived three-component Lognormal arrival-gap mixture; see the preset notes for provenance and offline fitting. Runtime generation does not read datasets.
+
 - `version: 3` selects pure configuration synthesis. `traffic.session_rate` is sessions/s, as a constant or a time curve. Request RPS emerges from multi-turn expansion.
 - Task and client weights are normalized separately. Local bursts and client activity act after allocation without suppressing other sources. Existing sessions retain their gaps.
 - Gamma/Weibull client clocks retain residual integrated intensity through rate changes. Curves are approximated by midpoint constant rates on the `traffic.resolution` grid plus curve/burst knots; reduce resolution to assess numerical convergence.
@@ -76,3 +78,5 @@ npm --prefix web test
 ```
 
 Tests verify deterministic replay, stream isolation, rate allocation, renewal residuals, ordering/cutoff, token accounting, partial tails, prefix sharing/isolation and analysis-window independence. These checks do not establish production representativeness.
+
+The default report includes `estimated_running_requests`: decode-only concurrency at 50/80/100 tokens/s per request, computed from next-input increments defined as output, without external-token subtraction, with immediate starts (final emitted requests excluded). Plots include wall-time-weighted CDF/PMF and window-average concurrency; the report includes quantiles, peaks and adjacent-request conflicts. This excludes prefill, queueing and concurrency slowdown and is not a serving measurement. Token metadata is required.

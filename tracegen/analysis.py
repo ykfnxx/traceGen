@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 
 from .validation import positive
+from .running import estimate_running
 
 
 def quantile(values, probability):
@@ -40,6 +41,9 @@ def analyze(path, manifest, window=10, task=None, client=None):
     total_blocks, reused_blocks, within_blocks, public_blocks = 0, 0, 0, 0
     metadata = manifest["config"].get("output", {}).get("request_metadata", True)
     joint = []
+    running_requests = []
+    running_next_arrivals = []
+    previous_inputs = {}
     opener = gzip.open if str(path).endswith(".gz") else open
     with opener(path, "rt", encoding="utf-8") as stream:
         for line in stream:
@@ -77,6 +81,11 @@ def analyze(path, manifest, window=10, task=None, client=None):
             if hashes:
                 values["reusable_prefix_fraction"].append(reused / len(hashes))
             if "input_tokens" in row:
+                if sid in previous_inputs:
+                    start, previous_input = previous_inputs[sid]
+                    running_requests.append((start, sid, row['input_tokens'] - previous_input))
+                    running_next_arrivals.append(t)
+                previous_inputs[sid] = (t, row['input_tokens'])
                 for field in ("input_tokens", "output_tokens"):
                     values[field].append(row[field])
                     bucket[field] += row[field]
@@ -161,7 +170,15 @@ def analyze(path, manifest, window=10, task=None, client=None):
                      omitted_requests_at_end=sum(s['planned_requests']-s['emitted_requests'] for s in sessions.values()))
         mix = [dict(key=k, requests=round(sum(b['tasks'].get(k,0)*(b['end']-b['start']) for b in bins)),
                     sessions=sum(s['task']==k for s in sessions.values())) for k in sorted({s['task'] for s in sessions.values()})]
+    running = estimate_running(running_requests, duration, window, running_next_arrivals) if metadata else None
+    if running is not None:
+        running.update(basis='output := next input_tokens - current input_tokens; no external-token subtraction',
+                       estimated_requests=len(running_requests), excluded_last_requests=len(previous_inputs),
+                       semantics='synthetic output defined as next input increment; last emitted request per session excluded; '
+                       'immediate start, fixed per-request speed; no prefill, queue or concurrency slowdown; '
+                       'wall-time weighted; conflicts retained, not serving measurements')
     return dict(window_seconds=window, request_metadata=metadata, filter=dict(task=task, client=client),
+                estimated_running_requests=running,
                 stats=stats, task_mix=mix,
                 historical_prefix_reuse=dict(block_references=total_blocks, reused_blocks=reused_blocks,
                     within_session_blocks=within_blocks, extra_cross_session_blocks=reused_blocks - within_blocks,
@@ -183,7 +200,7 @@ def plot(report, output):
     import matplotlib.pyplot as plt
     from matplotlib.patches import Rectangle
     from matplotlib.colors import LogNorm
-    fig, axes = plt.subplots(4, 3, figsize=(17, 16), constrained_layout=True)
+    fig, axes = plt.subplots(5, 3, figsize=(17, 20), constrained_layout=True)
     axes = axes.flat
     series, rates = report["time_series"], report["rate_segments"]
     t = [b["start"] for b in series]
@@ -241,6 +258,23 @@ def plot(report, output):
     axes[11].set_ylim(bottom=0)
     if density:
         fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap="viridis"), ax=axes[11], label="requests")
+    running = report.get('estimated_running_requests')
+    if running is not None:
+        for scenario in running['scenarios']:
+            label = f"{scenario['tokens_per_second_per_request']} tok/s/req"
+            points = scenario['cdf']
+            axes[12].step([p[0] for p in points], [p[1] for p in points], where='post', label=label)
+            step(axes[13], t, scenario['window_means'], label)
+            points = scenario['pmf']
+            conflict = scenario['conflict_fraction']
+            detail = f'{label}; conflict {conflict:.1%}' if conflict is not None else f'{label}; no adjacent pairs'
+            axes[14].plot([p[0] for p in points], [p[1] for p in points], label=detail)
+    else:
+        for ax in (axes[12], axes[13], axes[14]):
+            ax.text(.5, .5, 'Unavailable: output token metadata required', ha='center', transform=ax.transAxes)
+    axes[12].set(title='Estimated running requests: wall-time CDF', xlabel='running requests', ylabel='CDF')
+    axes[13].set(title='Output = next input delta; excludes final requests', xlabel='seconds', ylabel='mean running requests')
+    axes[14].set(title='Estimated running requests: wall-time PMF', xlabel='running requests', ylabel='time fraction')
     for ax in axes:
         ax.grid(alpha=.2)
         if ax.get_legend_handles_labels()[0]: ax.legend(fontsize=7)

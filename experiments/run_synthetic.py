@@ -43,7 +43,8 @@ def main():
     except (ValueError, TypeError, KeyError, OSError, ImportError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps(report["stats"], indent=2))
+    print(json.dumps({**report["stats"],
+                      "historical_prefix_reuse": report["historical_prefix_reuse"]}, indent=2))
     print(f"Outputs: {args.output_dir.resolve()}")
     return 0
 

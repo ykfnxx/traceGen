@@ -30,7 +30,8 @@ class Distribution:
         self.spec = spec if isinstance(spec, dict) else {"distribution": "fixed", "value": spec}
         self.kind = self.spec.get("distribution", "fixed")
         allowed = {"fixed": "value", "gamma": "mean cv min max",
-                   "lognormal": "mean cv min max", "discrete": "values weights"}
+                   "lognormal": "mean cv min max", "discrete": "values weights",
+                   "mixture": "components weights"}
         if self.kind not in allowed:
             raise ValueError(f"{name}: unsupported distribution {self.kind}")
         fields(self.spec, "distribution " + allowed[self.kind], name)
@@ -46,7 +47,21 @@ class Distribution:
             integer(self.low, name + ".min", minimum)
             if self.high is not None:
                 integer(self.high, name + ".max", minimum)
-        if self.kind == "fixed":
+        if self.kind == "mixture":
+            components = self.spec.get("components")
+            if not isinstance(components, list) or not components:
+                raise ValueError(f"{name}.components must be a nonempty list")
+            if any(isinstance(c, dict) and c.get("distribution") == "mixture" for c in components):
+                raise ValueError(f"{name}: nested mixtures are not supported")
+            self.components = [Distribution(c, f"{name}.components[{i}]", count=count, minimum=minimum)
+                               for i, c in enumerate(components)]
+            self.weights = self.spec.get("weights", [1] * len(components))
+            if not isinstance(self.weights, list) or len(self.weights) != len(components):
+                raise ValueError(f"{name}.weights must match components")
+            for weight in self.weights:
+                nonnegative(weight, name + ".weight")
+            positive(sum(self.weights), name + ".total_weight")
+        elif self.kind == "fixed":
             self._value(self.spec.get("value"), minimum)
         elif self.kind == "discrete":
             values = self.spec.get("values")
@@ -75,6 +90,8 @@ class Distribution:
 
     def sample(self, rng):
         s = self.spec
+        if self.kind == "mixture":
+            return rng.choices(self.components, self.weights, k=1)[0].sample(rng)
         if self.kind == "fixed":
             value = s["value"]
         elif self.kind == "discrete":

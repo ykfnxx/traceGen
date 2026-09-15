@@ -98,11 +98,13 @@ python3 preview.py
 
 时间窗口为 `[0, duration)`。Session 从零时刻的空系统开始发起，截止后的请求省略。活跃 session 从首请求持续到计划末请求，截止时截断；单请求或全零间隔 session 的活跃时间为零。它不等于执行中的推理并发数。
 
-`run_synthetic.py` 额外写入 `config.json`、`report.json` 和可选 `curves.png/svg`。报告包括任务/client RPS、IAT、轮数、时长、长度、条件上下文分位数、历史前缀复用、复用间隔、token/s、自相关及间隔—增长二维统计。PNG/SVG 展示其中 12 组核心图。历史复用比例是无驱逐条件下的机会，不是实际缓存命中率。
+`run_synthetic.py` 额外写入 `config.json`、`report.json` 和可选 `curves.png/svg`。报告包括任务/client RPS、IAT、轮数、时长、长度、条件上下文分位数、历史前缀复用、复用间隔、token/s、自相关及间隔—增长二维统计。PNG/SVG 展示其中 15 组核心图。历史复用比例是无驱逐条件下的机会，不是实际缓存命中率。
 
 ## 参考配置与实现边界
 
 [预设说明](examples/presets/README.md)包含 chat、coding agent、短流程问答、客服、串行研究、数据分析、长 agent、头部 client、日周期与 burst 混合配置。
+
+daily_mixed 的 coding 采用 Weka 参考的三分量 Lognormal 到达间隔，详见预设说明；运行时不读取数据集。
 
 当前实现配置驱动核心、CLI、JSON 统计、静态曲线与交互编辑/对比工作台。压缩、分叉、重试、human turn 层级、并发准入和 serving 反馈也不在基础核心中。详见[重构设计](docs/config-driven-refactor.md)。
 
@@ -124,3 +126,5 @@ npm --prefix web test
 ```
 
 测试覆盖随机复现与隔离、流量分配、峰谷残余时钟、时间归并与截止边界、token 核算、部分尾块、共享范围、私有隔离和统计窗口独立性。通过这些检查不代表符合真实生产负载。
+
+默认报告 `estimated_running_requests` 按每请求 50/80/100 token/s，将相邻输入增量定义为输出量，除以速度估算时长（不扣除外部新增，不使用独立 output_tokens 字段；末次已输出请求排除）。统计图包含时间加权并发 CDF、分布和窗口平均并发曲线；报告另含均值、P50/P95/P99、峰值及串行依赖冲突比例。假设到达即执行，不含 prefill、排队或并发降速，不是 serving 实测；缺少请求 token 元数据时不可计算。
