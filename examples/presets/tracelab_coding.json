@@ -1,0 +1,27 @@
+{
+  "version": 3,
+  "duration": 600,
+  "seed": 42,
+  "block_size": 128,
+  "traffic": {
+    "session_rate": 0.03,
+    "arrival": {
+      "cv": 1
+    }
+  },
+  "tasks": [
+    {
+      "key": "coding_agent",
+      "clients": {
+        "count": 3
+      },
+      "source": {
+        "type": "tracelab",
+        "path": "../../runs/tracelab-screen-v002/syfi_coding_trace.jsonl.gz"
+      },
+      "session": {
+        "max_context_tokens": 262144
+      }
+    }
+  ]
+}

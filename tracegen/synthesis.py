@@ -26,6 +26,17 @@ class Session:
         seed = stable_seed(pool.seed, task["key"], client.key, ordinal, "session-v1")
         streams = {name: random.Random(stable_seed(seed, name))
                    for name in ("structure", "growth", "output", "timing")}
+        if task['templates'] is not None:
+            template = random.Random(stable_seed(seed, 'sampling')).choice(task['templates'])
+            self.seed, self.block_size = seed, pool.block_size
+            self.public_identity, self.public_blocks = None, 0
+            self.plan = [dict({k: v for k, v in r.items() if k != 'relative_time'},
+                              timestamp=start + r['relative_time']) for r in template['records']]
+            self.metadata = dict(session_id=self.id, task=task['key'], client=client.key,
+                ordinal=ordinal, session_seed=str(seed), start=start, end=self.plan[-1]['timestamp'],
+                planned_requests=len(self.plan), emitted_requests=0, public_prefix_tokens=0,
+                source_provider=template['provider'], source_session_id=template['session_id'])
+            return
         p = task["profile"]
         count = p["requests"].sample(streams["structure"])
         private = p["initial_private_tokens"].sample(streams["structure"])
@@ -62,7 +73,8 @@ class Session:
             if not math.isfinite(start + offset):
                 raise ValueError("session timestamp out of range")
             self.plan.append(dict(timestamp=start + offset, request_index=index,
-                                  input_tokens=tokens, output_tokens=output, external_tokens=external))
+                                  input_tokens=tokens, output_tokens=output, external_tokens=external,
+                                  current_user_message_count=None, is_agent_turn_end=None))
             previous_output = output
         self.metadata = dict(session_id=self.id, task=task["key"], client=client.key,
                              ordinal=ordinal, session_seed=str(seed), start=start,
@@ -76,9 +88,15 @@ class Session:
     def requests(self, duration):
         hashes = []
         parent = block_hash("root", self.block_size)
+        previous_tokens, generation = 0, 0
         for record in self.plan:
             if record["timestamp"] >= duration:
                 break
+            if record['input_tokens'] < previous_tokens:
+                generation += 1
+                hashes = []
+                parent = block_hash('root', self.block_size, self.id, generation)
+            previous_tokens = record['input_tokens']
             for i in range(len(hashes), record["input_tokens"] // self.block_size):
                 identity = (["public", self.public_identity] if i < self.public_blocks else
                             ["private", self.id, str(self.seed), self.public_identity])
@@ -119,8 +137,8 @@ def events(pool):
                                       (session, requests, following)))
 
 
-def generate(config, output):
-    pool = ClientPool(config)
+def generate(config, output, config_dir=None):
+    pool = ClientPool(config, config_dir)
     output = Path(output).resolve()
     manifest_path = Path(str(output) + ".manifest.json")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -149,7 +167,7 @@ def generate(config, output):
                     source["requests"] += 1
                     source["blocks"] += len(row["hash_ids"])
                     if not config.get("output", {}).get("request_metadata", True):
-                        row = {k: row[k] for k in ("timestamp", "session_id", "hash_ids")}
+                        row = {k: row[k] for k in ("timestamp", "session_id", "hash_ids", "current_user_message_count", "is_agent_turn_end")}
                     encoded = (json.dumps(row, separators=(",", ":"), ensure_ascii=False,
                                           allow_nan=False) + "\n").encode("utf-8")
                     fingerprint.update(encoded)
@@ -177,7 +195,15 @@ def generate(config, output):
                      truncated_sessions=sum(s["emitted_requests"] < s["planned_requests"] for s in session_list),
                      omitted_requests_at_end=sum(s["planned_requests"] - s["emitted_requests"] for s in session_list),
                      peak_concurrent_sessions=peak, mean_concurrent_sessions=area / pool.duration)
-        manifest = dict(schema_version=3, generator="tracegen-config-v3", config=config,
+        source_stats = []
+        for task in pool.tasks:
+            if task['source_info'] is not None:
+                sampled = [s for s in session_list if s['task'] == task['key']]
+                unique = len({(s['source_provider'], s['source_session_id']) for s in sampled})
+                source_stats.append(dict(task=task['key'], **task['source_info'],
+                    sampled_sessions=len(sampled), used_source_sessions=unique,
+                    repeat_samples=len(sampled)-unique))
+        manifest = dict(sources=source_stats, schema_version=3, generator="tracegen-config-v3", config=config,
                         timestamp_unit="seconds", window="[0, duration)",
                         timing="independent client renewal clocks; direct inter-request arrival gaps",
                         seed_scheme="sha256 UTF-8 compact JSON array, first 128 bits; session-v1 and named substreams",

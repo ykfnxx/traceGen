@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-traceGen 根据任务配置合成 LLM serving 接收的多轮请求流。新入口不需要数据集：整体配置控制 **session 发起强度**、任务组成、波峰波谷和 burst；client 独立发起 session；每个 session 根据独立 seed 采样轮数、上下文增长和请求间隔，最后按到达时间归并。
+traceGen 根据任务配置合成 LLM serving 接收的多轮请求流。默认分布模式不需要数据集：整体配置控制 **session 发起强度**、任务组成、波峰波谷和 burst；client 独立发起 session；每个 session 根据独立 seed 采样轮数、上下文增长和请求间隔，最后按到达时间归并。
 
 输出表达请求时序和合成前缀关系，不包含真实文本、推理执行或缓存容量模型。参考配置的数字均为人工示例，论文用于提供规律，不进行自动校准。
 
@@ -91,14 +91,14 @@ python3 preview.py
 请求默认包含：
 
 ```json
-{"timestamp":2.0,"request_index":0,"input_tokens":640,"output_tokens":200,"external_tokens":128,"session_id":"chat:client-000000:00000000","hash_ids":["...完整 block 身份..."]}
+{"timestamp":2.0,"current_user_message_count":null,"is_agent_turn_end":null,"request_index":0,"input_tokens":640,"output_tokens":200,"external_tokens":128,"session_id":"chat:client-000000:00000000","hash_ids":["...完整 block 身份..."]}
 ```
 
-`output.request_metadata: false` 可只保留 `timestamp/hash_ids/session_id`。短请求的 `hash_ids: []` 仍输出；不删请求来满足比例。首请求的 `external_tokens` 是初始私有长度，后续是应用增长倍率后的外部新增。
+所有请求必带 `current_user_message_count` 和 `is_agent_turn_end`，分布模式均填 `null`。`output.request_metadata: false` 保留 `timestamp/hash_ids/session_id` 和这两个标签。缺字段旧 trace 不兼容。短请求的 `hash_ids: []` 仍输出；不删请求来满足比例。首请求的 `external_tokens` 是初始私有长度，后续是应用增长倍率后的外部新增。
 
 时间窗口为 `[0, duration)`。Session 从零时刻的空系统开始发起，截止后的请求省略。活跃 session 从首请求持续到计划末请求，截止时截断；单请求或全零间隔 session 的活跃时间为零。它不等于执行中的推理并发数。
 
-`run_synthetic.py` 额外写入 `config.json`、`report.json` 和可选 `curves.png/svg`。报告包括任务/client RPS、IAT、轮数、时长、长度、条件上下文分位数、历史前缀复用、复用间隔、token/s、自相关及间隔—增长二维统计。PNG/SVG 展示其中 15 组核心图。历史复用比例是无驱逐条件下的机会，不是实际缓存命中率。
+`run_synthetic.py` 额外写入 `config.json`、`report.json` 和可选 `curves.png/svg`。报告包括任务/client RPS、IAT、轮数、时长、长度、条件上下文分位数、历史前缀复用、复用间隔、token/s、自相关及间隔—增长二维统计。PNG/SVG 展示其中 12 组核心图。历史复用比例是无驱逐条件下的机会，不是实际缓存命中率。
 
 ## 参考配置与实现边界
 
@@ -127,4 +127,14 @@ npm --prefix web test
 
 测试覆盖随机复现与隔离、流量分配、峰谷残余时钟、时间归并与截止边界、token 核算、部分尾块、共享范围、私有隔离和统计窗口独立性。通过这些检查不代表符合真实生产负载。
 
-默认报告 `estimated_running_requests` 按每请求 50/80/100 token/s，将相邻输入增量定义为输出量，除以速度估算时长（不扣除外部新增，不使用独立 output_tokens 字段；末次已输出请求排除）。统计图包含时间加权并发 CDF、分布和窗口平均并发曲线；报告另含均值、P50/P95/P99、峰值及串行依赖冲突比例。假设到达即执行，不含 prefill、排队或并发降速，不是 serving 实测；缺少请求 token 元数据时不可计算。
+上下文新增包含模型输出及工具结果、用户输入等外部内容，不能除以固定解码速度推断推理用时。报告不再提供由此推导的 running requests 或串行冲突校验；token/s 表示到达请求的 token 需求，不是服务端实际吞吐。
+
+## TraceLab 整段 session 采样
+
+使用 [tracelab_coding.json](examples/presets/tracelab_coding.json)，按 [配置说明](docs/configuration.md#tracelab-整段采样) 下载本地数据并设置 `source.path`：
+
+```bash
+python3 experiments/run_synthetic.py --config examples/presets/tracelab_coding.json --output-dir runs/tracelab-coding --window 60
+```
+
+整段保留相对时间、输入/输出长度与用户消息数量，重新分配开始时间和私有 hash。`is_agent_turn_end` 在下一请求带用户消息时为 true，源序列末条为 null；窗口截断不改标签。manifest 的 `sessions` 为每个生成 session 记录 task、client、seed、时间、请求数，以及采样源 provider/session。其他任务可以继续按分布生成。

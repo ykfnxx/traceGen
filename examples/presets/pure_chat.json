@@ -1,0 +1,156 @@
+{
+  "version": 3,
+  "duration": 86400,
+  "seed": 42,
+  "block_size": 128,
+  "notes": "pure_chat：纯 qa_agent 的24小时合成数据集。沿用 daily-mixed-tracelab-24h 的 QA 行为参数，将整体 session 到达强度提高到原来的5倍，全部 session 分配给 qa_agent，目标超过200万unique blocks。名称不表示普通聊天实测数据；间隔、长度及轮数形状为配置假设。",
+  "traffic": {
+    "session_rate": {
+      "points": [
+        [
+          0,
+          0.705
+        ],
+        [
+          3600,
+          0.8225
+        ],
+        [
+          7200,
+          1.175
+        ],
+        [
+          25200,
+          1.175
+        ],
+        [
+          28800,
+          0.76375
+        ],
+        [
+          32400,
+          1.175
+        ],
+        [
+          54000,
+          1.175
+        ],
+        [
+          57600,
+          0.76375
+        ],
+        [
+          61200,
+          1.175
+        ],
+        [
+          79200,
+          1.175
+        ],
+        [
+          82800,
+          0.8225
+        ],
+        [
+          86400,
+          0.705
+        ]
+      ],
+      "period": 86400
+    },
+    "resolution": 60,
+    "arrival": {
+      "distribution": "gamma",
+      "cv": 0.7
+    }
+  },
+  "prefix_groups": [
+    {
+      "key": "qa_agent-system",
+      "tokens": 1024,
+      "scope": "task"
+    }
+  ],
+  "tasks": [
+    {
+      "key": "qa_agent",
+      "weight": 1,
+      "clients": {
+        "count": 4
+      },
+      "arrival": {
+        "distribution": "gamma",
+        "cv": 0.7
+      },
+      "prefix_groups": [
+        {
+          "key": "qa_agent-system"
+        }
+      ],
+      "session": {
+        "requests": {
+          "distribution": "lognormal",
+          "mean": 2.4,
+          "cv": 0.8,
+          "min": 1,
+          "max": 12
+        },
+        "initial_private_tokens": {
+          "distribution": "lognormal",
+          "mean": 600,
+          "cv": 0.7,
+          "min": 1,
+          "max": 4000
+        },
+        "growth_multiplier": {
+          "distribution": "lognormal",
+          "mean": 1,
+          "cv": 0.35,
+          "min": 0.2,
+          "max": 3
+        },
+        "external_tokens": {
+          "distribution": "lognormal",
+          "mean": 1500,
+          "cv": 0.9,
+          "min": 1,
+          "max": 8000
+        },
+        "output_tokens": {
+          "distribution": "lognormal",
+          "mean": 240,
+          "cv": 0.7,
+          "min": 1,
+          "max": 1600
+        },
+        "gap": {
+          "distribution": "mixture",
+          "weights": [
+            0.85,
+            0.13,
+            0.02
+          ],
+          "components": [
+            {
+              "distribution": "lognormal",
+              "mean": 3,
+              "cv": 0.6
+            },
+            {
+              "distribution": "lognormal",
+              "mean": 15,
+              "cv": 1
+            },
+            {
+              "distribution": "lognormal",
+              "mean": 120,
+              "cv": 1.5
+            }
+          ]
+        },
+        "max_context_tokens": 262144
+      },
+      "notes": "短流程工具问答；调用均值参考 XPerf Table 2 的 LLMCompiler 2.4 calls/user task；线性短链近似，不模拟其执行 DAG。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。 Gap 为三个连续 Lognormal 的人工参考混合，依据多时间尺度规律而非实测间隔拟合；权重、mean、CV 均为补充假设，依据及局限见 docs/task-gap-mixtures.md。 每次独立选择分量再随机采样，无固定间隔或 min/max 裁剪；不模拟阶段转移。"
+    }
+  ]
+}

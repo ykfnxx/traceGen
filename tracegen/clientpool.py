@@ -1,6 +1,8 @@
 """独立 client 时钟与整体 session 发起强度的分配。"""
 
 from dataclasses import dataclass
+from pathlib import Path
+from .tracelab import TraceLab
 import math
 import random
 
@@ -31,7 +33,7 @@ class Client:
 
 
 class ClientPool:
-    def __init__(self, config):
+    def __init__(self, config, config_dir=None):
         fields(config, "version duration seed block_size traffic tasks prefix_groups output notes", "config")
         if config.get("version") != 3:
             raise ValueError("tasks configuration requires version: 3")
@@ -65,9 +67,10 @@ class ClientPool:
             raise ValueError("tasks must be a nonempty list")
         self.tasks, self.clients = [], []
         names = set()
+        sources = {}
         curves = [self.rate, self.bursts]
         for spec in specs:
-            fields(spec, "key weight clients arrival bursts session prefix_groups notes", "task")
+            fields(spec, "key weight clients arrival bursts session prefix_groups notes source", "task")
             name = key(spec.get("key"), "task.key")
             if name in names:
                 raise ValueError("task keys must be unique")
@@ -75,16 +78,31 @@ class ClientPool:
             weight = Curve(spec.get("weight", 1), name + ".weight")
             bursts = Bursts(spec.get("bursts", []), self.duration, name + ".bursts")
             profile = spec.get("session", {})
-            fields(profile, "requests initial_private_tokens growth_multiplier external_tokens output_tokens gap max_context_tokens", name + ".session")
-            context_limit = profile.get("max_context_tokens")
+            source = spec.get('source')
+            context_limit = profile.get('max_context_tokens')
             if context_limit is not None:
-                integer(context_limit, name + ".session.max_context_tokens", 1)
+                integer(context_limit, name + '.session.max_context_tokens', 1)
+            templates, source_info = None, None
             distributions = {}
-            defaults = {"growth_multiplier": 1, "external_tokens": 0, "output_tokens": 0}
-            for field in ("requests", "initial_private_tokens", "growth_multiplier", "external_tokens", "output_tokens", "gap"):
-                distributions[field] = Distribution(profile.get(field, defaults.get(field)),
-                    name + ".session." + field, count=field not in ("gap", "growth_multiplier"),
-                    minimum=1 if field == "requests" else 0)
+            if source is not None:
+                fields(source, 'type path', name + '.source')
+                if source.get('type') != 'tracelab':
+                    raise ValueError('source.type must be tracelab')
+                fields(profile, 'max_context_tokens', name + '.session')
+                path = Path(key(source.get('path'), 'source.path'))
+                path = (Path(config_dir or Path.cwd()) / path).resolve()
+                if path not in sources:
+                    sources[path] = TraceLab(path)
+                templates, source_info = sources[path].select(context_limit)
+                if spec.get('prefix_groups'):
+                    raise ValueError('TraceLab tasks cannot add prefix_groups')
+            else:
+                fields(profile, "requests initial_private_tokens growth_multiplier external_tokens output_tokens gap max_context_tokens", name + ".session")
+                defaults = {"growth_multiplier": 1, "external_tokens": 0, "output_tokens": 0}
+                for field in ("requests", "initial_private_tokens", "growth_multiplier", "external_tokens", "output_tokens", "gap"):
+                    distributions[field] = Distribution(profile.get(field, defaults.get(field)),
+                        name + ".session." + field, count=field not in ("gap", "growth_multiplier"),
+                        minimum=1 if field == "requests" else 0)
             choices = spec.get("prefix_groups", [])
             if not isinstance(choices, list):
                 raise ValueError(name + ".prefix_groups must be a list")
@@ -96,7 +114,8 @@ class ClientPool:
             if choices:
                 positive(sum(c.get("weight", 1) for c in choices), name + ".prefix_group.total_weight")
             task = dict(key=name, weight=weight, bursts=bursts, profile=distributions,
-                        prefix_groups=choices, clients=[], max_context_tokens=context_limit)
+                        prefix_groups=choices, clients=[], max_context_tokens=context_limit,
+                        templates=templates, source_info=source_info)
             curves.extend([weight, bursts])
             client_specs = spec.get("clients", {"count": 1})
             if isinstance(client_specs, dict):

@@ -22,7 +22,7 @@ def run_config(config_path, output_dir, window=10, plots=True):
         raise ValueError("output directory must not overwrite the input configuration")
     config = json.loads(config_path.read_text(encoding="utf-8"))
     trace = output_dir / "trace.jsonl"
-    manifest = generate(config, trace)
+    manifest = generate(config, trace, config_path.parent)
     report = analyze(trace, manifest, window)
     for name, data in (("config.json", config), ("report.json", report)):
         (output_dir / name).write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")

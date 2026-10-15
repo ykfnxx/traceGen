@@ -4,12 +4,13 @@
 
 | 配置 | 规律与人工设定 |
 |---|---|
+| [tracelab_coding.json](tracelab_coding.json) | TraceLab v0.0.2 整段 coding session 采样；保留时间、长度与 Agent 轮次标签，需本地源文件 |
 | [chat.json](chat.json) | 较少请求，较长轮间时间；历史随轮次增长 |
 | [coding_agent.json](coding_agent.json) | 较密集的 LLM 调用，工具结果式外部新增，异质 session 增长倍率 |
 | [long_agent.json](long_agent.json) | 20/60/150 次调用，较大新增上下文，混合短间隔与长停顿 |
 | [head_clients.json](head_clients.json) | client 排名权重 `1/r^1.6`；集中度作用于 session 发起，不是硬性请求份额 |
 | [daily_mixed.json](daily_mixed.json) | 24 小时周期控制点，60 秒强度网格；Chat、Copilot coding 与四类 agent 混合；所有轮数均随机采样 |
-| [daily_mixed_2m.json](daily_mixed_2m.json) | 超过 200 万 unique blocks 的独立高负载配置快照；86400 秒、seed=42，实测 2,104,707 个 unique blocks，80 token/s 估算 running 峰值 69 |
+| [daily_mixed_2m.json](daily_mixed_2m.json) | 以超过 200 万 unique blocks 为目标的独立高负载配置；86400 秒、seed=42，实际数量以当前生成报告为准 |
 | [qa_agent.json](qa_agent.json) | LLMCompiler 式短流程问答的线性近似，少量调用 |
 | [customer_service_agent.json](customer_service_agent.json) | Tau-Bench 式客服查询和操作，小幅上下文增长 |
 | [research_agent.json](research_agent.json) | DeerFlow 式串行研究，较大的外部新增上下文 |
@@ -41,7 +42,7 @@ Session 发起使用 Gamma 分布，整体及所有 task 的 CV=0.7；请求到�
 | 17–22 | 0.235，持续 5 小时高平台 |
 | 22–24 | 0.235 → 0.1645 → 0.141 |
 
-保留 86400 秒周期和 60 秒强度积分网格。平台表示 session 发起强度持平，running requests 仍因多轮延迟和随机服务时间波动；不是把并发固定在 64。当前强度用于生成超过 200 万 unique blocks 的 24 小时高负载参考场景。Running 仍按 80 token/s、输出等于下一输入增量且排除末次请求估算，不设置 64 的硬上限。其他 seed 或时长不保证相同 block 数或峰值，运行时不自动调节强度或限流。
+保留 86400 秒周期和 60 秒强度积分网格。平台表示 session 发起强度持平，不表示推理并发固定。当前强度用于超过 200 万 unique blocks 的高负载场景；实际数量以生成报告为准，运行时不自动调节强度或限流。
 
 ## daily_mixed 的会话请求数
 
@@ -51,20 +52,20 @@ Coding 参考 [Agentic Coding in the Wild，Table 4](https://arxiv.org/html/2608
 
 Chat 使用 `lognormal(mean=4.2, cv=0.8, min=1, max=30)`，属于人工短会话设定。全部任务均设置 `max_context_tokens=262144`；下一次总输入超限时结束 session，不截断历史。实际计划轮数会低于部分原始抽样轮数；最终还受输出时间窗口限制。task 权重代表 session 发起份额，不是请求份额。
 
-日周期、client 分配和增长/输出长度保持人工设定；coding 轮间间隔使用下述 Weka 基础分布并按 80 token/s 约束缩放，不声称复现 Copilot 的联合分布。当前没有用户 turn 层级、压缩、模型切换或缓存淘汰，历史 block 复用机会不能直接当作论文的实际缓存命中率。
+日周期、client 分配和增长/输出长度保持人工设定；coding 轮间间隔使用下述 Weka 基础混合分布，不声称复现 Copilot 的联合分布。当前没有用户 turn 层级、压缩、模型切换或缓存淘汰，历史 block 复用机会不能直接当作论文的实际缓存命中率。
 
 ## daily_mixed 的 agent 组成
 
-Coding 的调用数分布、weight=1、clients、长度以及 coding-system 前缀保持 Copilot 调整后的配置，间隔采用按新增量 80 token/s 约束缩放的 Weka 混合分布；Chat 间隔使用 ServeGen 公开子集拟合。整体日周期采用三段高负载平台，具体时段与强度见下文。加入任务会重新归一化各任务权重，因此 coding 的 session 到达频率和最终请求占比会变化。
+Coding 的调用数分布、weight=1、clients、长度以及 coding-system 前缀保持 Copilot 调整后的配置，间隔采用Weka 原始拟合混合分布；Chat 间隔使用 ServeGen 公开子集拟合。整体日周期采用三段高负载平台，具体时段与强度见下文。加入任务会重新归一化各任务权重，因此 coding 的 session 到达频率和最终请求占比会变化。
 
 | task | session 权重 / 份额 | 请求数 mean / CV / max | gap 均值（秒） | 初始私有 / 外部新增 / 输出均值（token） |
 |---|---|---|---|---|
 | chat | 3 / 30% | 4.2 / 0.8 / 30 | 1637.35（混合期望） | 240 / 100 / 180 |
-| coding_agent | 1 / 10% | 40.6 / 2.5152 / 2555 | 616.20（混合期望） | 1800 / 800 / 350 |
-| qa_agent | 3 / 30% | 2.4 / 0.8 / 12 | 131.79（混合期望） | 600 / 1500 / 240 |
-| customer_service_agent | 1.5 / 15% | 14.9 / 0.45 / 80 | 112.80（混合期望） | 400 / 180 / 160 |
-| research_agent | 0.75 / 7.5% | 14.7 / 0.3 / 60 | 829.92（混合期望） | 1200 / 6000 / 700 |
-| data_analysis_agent | 0.75 / 7.5% | 18 / 0.85 / 150 | 256.76（混合期望） | 2000 / 1800 / 400 |
+| coding_agent | 1 / 10% | 40.6 / 2.5152 / 2555 | 246.48（混合期望） | 1800 / 800 / 350 |
+| qa_agent | 3 / 30% | 2.4 / 0.8 / 12 | 6.90（混合期望） | 600 / 1500 / 240 |
+| customer_service_agent | 1.5 / 15% | 14.9 / 0.45 / 80 | 56.40（混合期望） | 400 / 180 / 160 |
+| research_agent | 0.75 / 7.5% | 14.7 / 0.3 / 60 | 62.40（混合期望） | 1200 / 6000 / 700 |
+| data_analysis_agent | 0.75 / 7.5% | 18 / 0.85 / 150 | 28.85（混合期望） | 2000 / 1800 / 400 |
 
 权重为人工混合场景，不是市场份额。表中为裁剪前分布参数；整数化、上下界裁剪、256k 上限和结束窗口都会影响实测均值。新增任务的请求数均使用 Lognormal，min=1；daily_mixed 的所有 gap 均为连续 Lognormal 混合，各分量内部随机采样且无上下界裁剪；参数和证据等级见[会话间隔说明](../../docs/task-gap-mixtures.md)。新增任务的增长倍率为 session 级 Lognormal(mean=1, cv=0.35)，每轮新增再独立抽样。
 
@@ -77,7 +78,7 @@ Coding 的调用数分布、weight=1、clients、长度以及 coding-system 前�
 
 ## Coding 的 Weka 到达间隔
 
-Coding 的原始参考拟合为以下三分量 Lognormal（均值单位秒）；当前 daily_mixed 的 mean 已乘以 2.5，以满足新增量口径的 80 token/s 约束，详见[参数说明](../../docs/task-gap-mixtures.md)：
+Coding 使用以下三分量 Lognormal 原始参考拟合（均值单位秒），不施加解码速度约束，详见[参数说明](../../docs/task-gap-mixtures.md)：
 
 | 权重 | mean | CV |
 |---|---:|---:|
@@ -97,7 +98,7 @@ python3 experiments/fit_weka_gaps.py \
   --output runs/weka-gap-fit/models.json
 ```
 
-原始拟合混合分布总体期望约246秒；当前缩放后约615秒，样本均值约237秒；重尾均值不稳定，主要核对P50/P90/P95/P99以及>=1/5/10/60分钟的比例。独立的旧 `coding_agent.json` 仍为人工示例；本次Weka调整作用于 `daily_mixed.json`。
+拟合混合分布总体期望约246秒，Weka 样本均值约237秒；重尾均值不稳定，主要核对P50/P90/P95/P99以及>=1/5/10/60分钟的比例。独立的旧 `coding_agent.json` 仍为人工示例；Weka 混合间隔用于 `daily_mixed.json` 和 `daily_mixed_2m.json`。
 
 运行独立的 200 万 block 预设：
 
@@ -105,4 +106,4 @@ python3 experiments/fit_weka_gaps.py \
 python3 experiments/run_synthetic.py --config examples/presets/daily_mixed_2m.json --output-dir runs/daily-mixed-2m --window 300
 ```
 
-该预设固定了本次验证配置；改变 seed、时长或分布后，unique blocks 数量和 running 峰值不保证相同。实验 trace、报告和图像保存在忽略的 `runs/` 目录，不随代码提交。
+该预设保留独立的高负载参数；改变 seed、时长或分布后，unique blocks 数量不保证相同。实验 trace、报告和图像保存在忽略的 `runs/` 目录，不随代码提交。

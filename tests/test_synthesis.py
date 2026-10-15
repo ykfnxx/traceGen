@@ -12,7 +12,6 @@ from tracegen.synthesis import generate
 from tracegen.profiles import Curve, Distribution
 from tracegen.synthesis import Session
 from tracegen.analysis import analyze
-from tracegen.running import estimate_running
 from experiments.run_synthetic import run_config
 
 
@@ -28,29 +27,6 @@ def config():
 
 
 class Synthesis(unittest.TestCase):
-    def test_running_estimate_time_weighting_and_conflicts(self):
-        result = estimate_running([(0, 's', 100), (1, 's', 100)], 5, 2)
-        self.assertEqual([s['tokens_per_second_per_request'] for s in result['scenarios']], [50, 80, 100])
-        scenario = result['scenarios'][0]  # 50 tokens/s: [0,2), [1,3)
-        self.assertEqual(scenario['pmf'], [[0, .4], [1, .4], [2, .2]])
-        self.assertAlmostEqual(scenario['mean'], .8)
-        self.assertEqual([scenario[k] for k in ('p50', 'p95', 'p99', 'peak')], [1, 2, 2, 2])
-        self.assertEqual(scenario['window_means'], [1.5, .5, 0])
-        self.assertEqual(scenario['conflict_fraction'], 1)
-        # Exact end/start ties, zero-length work and window truncation.
-        scenario = estimate_running([(0, 's', 100), (2, 's', 0), (4, 's', 100)], 5, 2)['scenarios'][0]
-        self.assertEqual(scenario['pmf'], [[0, .4], [1, .6]])
-        self.assertEqual(scenario['conflict_fraction'], 0)
-        self.assertEqual(scenario['still_running_at_end'], 1)
-        empty = estimate_running([], 5, 2)['scenarios'][0]
-        self.assertEqual(empty['pmf'], [[0, 1]])
-        self.assertIsNone(empty['conflict_fraction'])
-        # Each delta-derived output has its own known next arrival, including
-        # the final adjacent pair even though the final request is excluded.
-        scenario = estimate_running([(0, 's', 100)], 5, 2, [1])['scenarios'][0]
-        self.assertEqual(scenario['adjacent_pairs'], 1)
-        self.assertEqual(scenario['conflict_count'], 1)
-
     def run_trace(self, cfg, suffix=".jsonl"):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / ("trace" + suffix)
@@ -191,7 +167,7 @@ class Synthesis(unittest.TestCase):
         a, m, _ = self.run_trace(c)
         c["output"] = {"request_metadata": False}
         b, n, _ = self.run_trace(c)
-        self.assertEqual([{k:r[k] for k in ("timestamp", "session_id", "hash_ids")} for r in a], b)
+        self.assertEqual([{k:r[k] for k in ("timestamp", "session_id", "hash_ids", "current_user_message_count", "is_agent_turn_end")} for r in a], b)
         self.assertEqual(m["stats"], n["stats"])
         self.assertEqual(m["sessions"], n["sessions"])
 
@@ -267,15 +243,12 @@ class Synthesis(unittest.TestCase):
             self.assertEqual(a["historical_prefix_reuse"]["within_session_blocks"], 1)
             self.assertEqual(a["historical_prefix_reuse"]["extra_cross_session_blocks"], 1)
             self.assertEqual([v["samples"] for v in a["context_by_request"]], [2, 1])
-            self.assertEqual(a['estimated_running_requests']['estimated_requests'], 1)
-            self.assertEqual(a['estimated_running_requests']['excluded_last_requests'], 2)
-            for one, two in zip(a['estimated_running_requests']['scenarios'], b['estimated_running_requests']['scenarios']):
-                self.assertEqual(one['pmf'], two['pmf'])
+            self.assertNotIn('estimated_running_requests', a)
             c["output"] = {"request_metadata": False}
             manifest = generate(c, Path(tmp) / "minimal.jsonl")
             minimal = analyze(Path(tmp) / "minimal.jsonl", manifest)
             self.assertFalse(minimal["request_metadata"])
-            self.assertIsNone(minimal['estimated_running_requests'])
+            self.assertNotIn('estimated_running_requests', minimal)
             self.assertEqual(minimal["context_by_request"], [])
             self.assertEqual(minimal["historical_prefix_reuse"], a["historical_prefix_reuse"])
 

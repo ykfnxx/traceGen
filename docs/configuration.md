@@ -205,3 +205,26 @@ arrival_seed = stable_seed(global_seed, task_key, client_key, "arrival-v1")
 Session 分布预览使用独立固定种子的 4096 次抽样，展示 clip/整数化后的 CDF 和抽样 PDF/概率质量，PDF 使用归一化分箱密度估计，不是解析 PDF。分布控件、来源筛选与图表缩放不会消费生成器随机数。
 
 基线保留运行 ID、原配置与原 seed。当前配置改动后不会覆盖基线；选择相同的统计窗口和来源重新统计两份 trace 后叠加。当前 seed 可显式修改，界面同时标注基线与当前 seed。
+
+## TraceLab 整段采样
+
+Task 增加可选 `source: {"type":"tracelab","path":"本地文件.jsonl.gz"}`。CLI 文件路径相对配置文件；Python `generate(config, output, config_dir=...)` 可指定基目录，默认当前工作目录。工作台传入配置对象时建议使用绝对路径。源文件不自动下载。
+
+```bash
+mkdir -p runs/tracelab-screen-v002
+curl -L --fail -o runs/tracelab-screen-v002/syfi_coding_trace.jsonl.gz https://github.com/uw-syfi/TraceLab/releases/download/v0.0.2/syfi_coding_trace.jsonl.gz
+```
+
+版本 v0.0.2 压缩文件 SHA256 应为 `11ce51ec0a25e3d1d95b025bca2f7d1647e47571eb7cc968acd5fc64d4b4fb65`。读取器记录实际文件 SHA256，不强制所有输入使用此版本；小型自有 TraceLab 文件同样可用。
+
+采样 task 的 `session` 仅接受 `max_context_tokens`，不能附加长度/gap 分布或公共前缀。按 provider/session 分组，检查序号、长度、用户计数和时间；超限或时间不合格的整段会话被排除，无可用会话时报错。源文件在一次生成中只解析一次。使用稳定 session seed 均匀、有放回抽样，整体强度只控制开始时间。
+
+每条请求的必选字段为 `timestamp`、`session_id`、`hash_ids`、`current_user_message_count`、`is_agent_turn_end`，即使 `request_metadata=false` 也保留。前者是本请求新增用户消息数，后者是 Agent 执行轮次结束标签；分布模式两者均为 null。下一请求有新用户消息时当前标签为 true，无新用户消息时为 false，源末条为 null。旧格式缺字段直接报错。
+
+TraceLab 的 `input_tokens`/`output_tokens` 保留源值；`external_tokens=null`，统计跳过未知值，不根据相邻输入差伪造外部新增。相对时间取每行首次模型输出之前最后输入事件时间，再减去首行锚点；缺失或倒退整段排除，相同时间允许。此时间是客户端输入就绪代理。
+
+输入缩减时重建私有 hash，后续增长不能找回旧 hash；非递减时继承完整块。源缓存读 token 不作为内容公共前缀。没有跨 session 共享；即使重复采样同一模板，私有 hash 也隔离。
+
+`trace.jsonl.manifest.json` 的 `sessions` 逐项记录生成 session 的 `task`、`client`、`session_seed`、计划首末时间、计划/输出请求数；采样项另有 `source_provider`、`source_session_id`。顶层 `sources` 按 task 记录文件路径、SHA256、筛选原因/数量、可用规模、采样次数、不同源 session 数和重复采样数。通过 session_id 关联 task，不解析标识猜测归属。
+
+图中的用户边界间隔由当前请求 `current_user_message_count>0` 分类，轮内间隔对应 0，未知为 null 单独统计；均为相邻到达之差，不推断工具或人工耗时。

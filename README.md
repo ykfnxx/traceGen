@@ -57,7 +57,7 @@ The daily coding profile uses a Weka-derived three-component Lognormal arrival-g
 
 `generate.py` writes JSONL (or deterministic `.jsonl.gz`) and `<trace>.manifest.json`. The manifest contains the configuration snapshot, effective client rates, session seeds/identities, planned and emitted counts, cutoff statistics and arrival-lifetime concurrency. Replay is deterministic with the same configuration, generator version and Python random implementation.
 
-Rows contain `timestamp`, `session_id`, `hash_ids`, plus `request_index`, `input_tokens`, `output_tokens` and `external_tokens` by default. Set `output.request_metadata: false` for only the first three fields. On request zero, `external_tokens` is the initial private context; later it is the scaled external increment. Empty block lists are retained.
+Rows contain `timestamp`, `session_id`, `hash_ids`, plus `request_index`, `input_tokens`, `output_tokens` and `external_tokens` by default. Every row also requires `current_user_message_count` and `is_agent_turn_end` (both null in distribution mode). `output.request_metadata: false` keeps the three identity/timing fields and these two labels. On request zero, `external_tokens` is the initial private context; later it is the scaled external increment. Empty block lists are retained.
 
 The output window is `[0, duration)`, starting empty. Requests at/after cutoff are omitted. Active sessions span first through planned last arrival, clipped at cutoff; singleton and zero-duration sessions contribute no active time. This is not inference concurrency. Gaps directly represent successive LLM arrivals without adding response time.
 
@@ -67,7 +67,7 @@ The output window is `[0, duration)`, starting empty. Requests at/after cutoff a
 
 The configuration core, CLI, JSON analysis, static plots and interactive curve/distribution workbench are implemented. Compression, branches, retries, human-turn hierarchy, admission limits and serving feedback remain outside the [base design](docs/config-driven-refactor.md).
 
-Only version 3 task configs are accepted. Dataset sampling, calibration, old admission/perturbation logic, conversion frontends and their obsolete scripts/tests/examples have been removed. There is a single generation path.
+Only version 3 task configs are accepted. Tasks support distribution synthesis or explicit whole-session TraceLab sampling through the same client pool. Old traces missing the two labels are rejected; there is no legacy-format export.
 
 See [paper-pattern validation](docs/paper-pattern-validation.md) for eight manual configurations across three seeds, measured against scoped ServeGen/FineServe statistics. The report distinguishes matching moments from unresolved joint distributions and records censoring and sampling effects. Reproduce with `python3 experiments/validate_paper_patterns.py`; optionally plot with `python3 experiments/plot_paper_patterns.py`.
 
@@ -79,4 +79,14 @@ npm --prefix web test
 
 Tests verify deterministic replay, stream isolation, rate allocation, renewal residuals, ordering/cutoff, token accounting, partial tails, prefix sharing/isolation and analysis-window independence. These checks do not establish production representativeness.
 
-The default report includes `estimated_running_requests`: decode-only concurrency at 50/80/100 tokens/s per request, computed from next-input increments defined as output, without external-token subtraction, with immediate starts (final emitted requests excluded). Plots include wall-time-weighted CDF/PMF and window-average concurrency; the report includes quantiles, peaks and adjacent-request conflicts. This excludes prefill, queueing and concurrency slowdown and is not a serving measurement. Token metadata is required.
+Context increments include model output and external content such as tool results. Reports do not infer running requests or serial conflicts from increments divided by a fixed decoding speed. Arrival token demand is not achieved serving throughput.
+
+## TraceLab whole-session sampling
+
+Use `examples/presets/tracelab_coding.json` with a local v0.0.2 JSONL.gz. Set `source.path` relative to the configuration file; direct Python and workbench calls use an absolute path or the process working directory. Run:
+
+```bash
+python3 experiments/run_synthetic.py --config examples/presets/tracelab_coding.json --output-dir runs/tracelab-coding --window 60
+```
+
+The source is not downloaded automatically. See [configuration](docs/configuration.md#tracelab-整段采样) for download, filtering, new fields and metadata. Each sampled session preserves relative input-ready times and token lengths. Shrinking context resets synthetic private hashes; these hashes are not measured content identity. Manifest `sessions` maps generated session IDs to task/client and source provider/session.

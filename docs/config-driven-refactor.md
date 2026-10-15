@@ -6,7 +6,7 @@
 
 根据整体配置和任务行为配置生成 LLM serving 接收的请求流，表达流量组成、波峰波谷、burst、多轮时序、上下文增长与前缀复用。
 
-生成过程不依赖 Weka、LMSYS 等数据集的 session 模板采样。论文提供负载规律和参考配置参数，不引入自动校准或迭代拟合。前缀使用合成身份，无需真实文本、tokenizer 或生产 block hash。
+支持按分布合成及 TraceLab 整段 session 采样，两者共享 client pool。TraceLab 模式的时间、标签和前缀规则见 [TraceLab 迭代说明](tracelab-iteration-plan.md)。论文提供负载规律和参考配置参数，不引入自动校准或迭代拟合。前缀使用合成身份，无需真实文本、tokenizer 或生产 block hash。
 
 ```text
 整体配置 + 任务行为配置
@@ -194,7 +194,6 @@ L[s, k] = L[s, k-1] + output_length[s, k-1]
 
 | 图表 | 横轴 → 纵轴 | 用途 |
 |---|---|---|
-| 估算 running requests | 并发值或时间 → 时间加权分布或窗口平均并发 | 按每请求 50/80/100 token/s，忽略 prefill 和排队；报告串行依赖冲突 |
 | Session 发起强度 | 时间 → sessions/s | 编辑输入曲线 |
 | 服务端总到达率 | 时间 → requests/s | 展示多轮展开结果 |
 | 任务流量堆叠 | 时间 → 各任务 RPS | 查看波峰组成 |
@@ -213,7 +212,7 @@ L[s, k] = L[s, k-1] + output_length[s, k-1]
 
 活跃 session 按首次至末次请求到达定义，不等于正在执行的推理请求数。单请求 session 的活跃持续时间为零。高轮次的上下文分位数仅统计到达该轮的 session。
 
-下图由[主示例配置](../examples/config.example.json)经 `run_synthetic.py --window 10` 生成，展示当前 CLI 的 15 组核心曲线，参数均为人工示例。
+下图由[主示例配置](../examples/config.example.json)经 `run_synthetic.py --window 10` 生成，展示当前 CLI 的 12 组核心曲线，参数均为人工示例。
 
 
 ### 8.2 编辑与预览
@@ -231,7 +230,7 @@ L[s, k] = L[s, k-1] + output_length[s, k-1]
 
 基础生成核心实现任务 profile、client pool、session 发起时钟、session 独立随机流、线性多轮、合成前缀、时间合并和可复现输出。命令行与交互界面使用同一份配置语义和生成核心。
 
-当前实现包含 version 3 配置协议、生成核心、六组人工预设、CLI、JSON 统计、PNG/SVG 曲线与交互编辑工作台。工作台支持参数控件、曲线和 burst 拖拽、task/client 筛选、统计窗口、平滑、对数轴、局部放大、固定基线叠加及导出。旧数据集生成、转换与校准代码及其脚本已删除，所有入口使用同一个合成核心。
+当前实现包含 version 3 配置协议、生成核心、六组人工预设、CLI、JSON 统计、PNG/SVG 曲线与交互编辑工作台。工作台支持参数控件、曲线和 burst 拖拽、task/client 筛选、统计窗口、平滑、对数轴、局部放大、固定基线叠加及导出。TraceLab 读取模块提供整段采样，所有入口使用同一个合成核心；不兼容旧 trace 缺少轮次标签的格式。
 
 压缩、分叉、重试、human turn 层级、复杂 client 活跃状态、并发准入以及 serving 运行时反馈不属于基础版本。
 
