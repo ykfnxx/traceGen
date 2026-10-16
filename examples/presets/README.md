@@ -4,6 +4,7 @@
 
 | 配置 | 规律与人工设定 |
 |---|---|
+| [task_scenarios_2p25m_3x_rpm/](task_scenarios_2p25m_3x_rpm/README.md) | 八类等 block 基线的三倍 session 到达强度版本；预期 RPM 约三倍，session 内行为保持不变，实际规模需生成后统计 |
 | [task_scenarios_2p25m/](task_scenarios_2p25m/README.md) | 六类纯任务及交互/Agent 两类混合场景；24 小时、近似相同 225 万 unique blocks；仅调整 session 发起强度，Coding 使用 TraceLab 整段采样 |
 | [tracelab_coding.json](tracelab_coding.json) | TraceLab v0.0.2 整段 coding session 采样；保留时间、长度与 Agent 轮次标签，需本地源文件 |
 | [chat.json](chat.json) | 较少请求，较长轮间时间；历史随轮次增长 |

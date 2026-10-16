@@ -1,0 +1,153 @@
+{
+  "version": 3,
+  "duration": 86400,
+  "seed": 42,
+  "block_size": 128,
+  "notes": "24h chat; session arrival intensity is exactly 3x task_scenarios_2p25m/chat.json. Same curve shape, task profiles, task weights, clients, seed=42 and block_size=128. Expected RPM is approximately 3x; actual RPM and unique blocks require measurement. No fixed unique-block target or tolerance is guaranteed. Coding uses whole TraceLab sessions; synthetic task labels are null.",
+  "traffic": {
+    "session_rate": {
+      "points": [
+        [
+          0,
+          6.379261995585905
+        ],
+        [
+          3600,
+          7.442472328183557
+        ],
+        [
+          7200,
+          10.632103325976509
+        ],
+        [
+          25200,
+          10.632103325976509
+        ],
+        [
+          28800,
+          6.910867161884731
+        ],
+        [
+          32400,
+          10.632103325976509
+        ],
+        [
+          54000,
+          10.632103325976509
+        ],
+        [
+          57600,
+          6.910867161884731
+        ],
+        [
+          61200,
+          10.632103325976509
+        ],
+        [
+          79200,
+          10.632103325976509
+        ],
+        [
+          82800,
+          7.442472328183557
+        ],
+        [
+          86400,
+          6.379261995585905
+        ]
+      ],
+      "period": 86400
+    },
+    "resolution": 60,
+    "arrival": {
+      "distribution": "gamma",
+      "cv": 0.7
+    }
+  },
+  "prefix_groups": [
+    {
+      "key": "chat-system",
+      "tokens": 512,
+      "scope": "task"
+    }
+  ],
+  "tasks": [
+    {
+      "key": "chat",
+      "weight": 1,
+      "clients": {
+        "count": 8
+      },
+      "prefix_groups": [
+        {
+          "key": "chat-system"
+        }
+      ],
+      "session": {
+        "requests": {
+          "distribution": "lognormal",
+          "mean": 4.2,
+          "cv": 0.8,
+          "min": 1,
+          "max": 30
+        },
+        "initial_private_tokens": {
+          "distribution": "lognormal",
+          "mean": 240,
+          "cv": 0.6,
+          "max": 2000
+        },
+        "growth_multiplier": {
+          "distribution": "lognormal",
+          "mean": 1,
+          "cv": 0.25,
+          "min": 0.2,
+          "max": 3
+        },
+        "external_tokens": {
+          "distribution": "gamma",
+          "mean": 100,
+          "cv": 0.8,
+          "max": 1000
+        },
+        "output_tokens": {
+          "distribution": "lognormal",
+          "mean": 180,
+          "cv": 0.7,
+          "max": 2000
+        },
+        "gap": {
+          "distribution": "mixture",
+          "weights": [
+            0.3799806654453906,
+            0.5772356104977462,
+            0.0427837240568601
+          ],
+          "components": [
+            {
+              "distribution": "lognormal",
+              "mean": 287.27527794765086,
+              "cv": 1.3789071886989093
+            },
+            {
+              "distribution": "lognormal",
+              "mean": 1437.5119664912486,
+              "cv": 3.0451505765444447
+            },
+            {
+              "distribution": "lognormal",
+              "mean": 16324.23951951436,
+              "cv": 0.6435848653732196
+            }
+          ]
+        },
+        "max_context_tokens": 262144
+      },
+      "notes": "Chat 轮数采用人工短会话 Lognormal，mean=4.2、cv=0.8；不是 Weka 测量。 Gap 使用 ServeGen 公开筛选多轮会话的 4104 个相邻 timestamp 差离线拟合三分量 Lognormal；不是 LMSYS 间隔，也不代表普通聊天总体。 每次独立选择分量再随机采样，无固定间隔或 min/max 裁剪；不模拟阶段转移。",
+      "arrival": {
+        "distribution": "gamma",
+        "cv": 0.7
+      }
+    }
+  ]
+}

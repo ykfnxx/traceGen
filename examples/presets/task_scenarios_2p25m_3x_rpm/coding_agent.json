@@ -1,0 +1,90 @@
+{
+  "version": 3,
+  "duration": 86400,
+  "seed": 42,
+  "block_size": 128,
+  "notes": "24h coding_agent; session arrival intensity is exactly 3x task_scenarios_2p25m/coding_agent.json. Same curve shape, task profiles, task weights, clients, seed=42 and block_size=128. Expected RPM is approximately 3x; actual RPM and unique blocks require measurement. No fixed unique-block target or tolerance is guaranteed. Coding uses whole TraceLab sessions; synthetic task labels are null.",
+  "traffic": {
+    "session_rate": {
+      "points": [
+        [
+          0,
+          0.05274907859546833
+        ],
+        [
+          3600,
+          0.061540591694713064
+        ],
+        [
+          7200,
+          0.08791513099244723
+        ],
+        [
+          25200,
+          0.08791513099244723
+        ],
+        [
+          28800,
+          0.057144835145090694
+        ],
+        [
+          32400,
+          0.08791513099244723
+        ],
+        [
+          54000,
+          0.08791513099244723
+        ],
+        [
+          57600,
+          0.057144835145090694
+        ],
+        [
+          61200,
+          0.08791513099244723
+        ],
+        [
+          79200,
+          0.08791513099244723
+        ],
+        [
+          82800,
+          0.061540591694713064
+        ],
+        [
+          86400,
+          0.05274907859546833
+        ]
+      ],
+      "period": 86400
+    },
+    "resolution": 60,
+    "arrival": {
+      "distribution": "gamma",
+      "cv": 0.7
+    }
+  },
+  "prefix_groups": [],
+  "tasks": [
+    {
+      "key": "coding_agent",
+      "weight": 1,
+      "clients": {
+        "count": 4,
+        "weight_exponent": 1
+      },
+      "arrival": {
+        "distribution": "gamma",
+        "cv": 0.7
+      },
+      "session": {
+        "max_context_tokens": 262144
+      },
+      "notes": "TraceLab v0.0.2 whole-session sampling; relative input-ready timestamps and observed user boundaries.",
+      "source": {
+        "type": "tracelab",
+        "path": "../../../runs/tracelab-screen-v002/syfi_coding_trace.jsonl.gz"
+      }
+    }
+  ]
+}

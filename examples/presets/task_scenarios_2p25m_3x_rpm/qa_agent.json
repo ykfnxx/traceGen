@@ -1,0 +1,156 @@
+{
+  "version": 3,
+  "duration": 86400,
+  "seed": 42,
+  "block_size": 128,
+  "notes": "24h qa_agent; session arrival intensity is exactly 3x task_scenarios_2p25m/qa_agent.json. Same curve shape, task profiles, task weights, clients, seed=42 and block_size=128. Expected RPM is approximately 3x; actual RPM and unique blocks require measurement. No fixed unique-block target or tolerance is guaranteed. Coding uses whole TraceLab sessions; synthetic task labels are null.",
+  "traffic": {
+    "session_rate": {
+      "points": [
+        [
+          0,
+          2.1572999999999993
+        ],
+        [
+          3600,
+          2.51685
+        ],
+        [
+          7200,
+          3.5954999999999995
+        ],
+        [
+          25200,
+          3.5954999999999995
+        ],
+        [
+          28800,
+          2.337075
+        ],
+        [
+          32400,
+          3.5954999999999995
+        ],
+        [
+          54000,
+          3.5954999999999995
+        ],
+        [
+          57600,
+          2.337075
+        ],
+        [
+          61200,
+          3.5954999999999995
+        ],
+        [
+          79200,
+          3.5954999999999995
+        ],
+        [
+          82800,
+          2.51685
+        ],
+        [
+          86400,
+          2.1572999999999993
+        ]
+      ],
+      "period": 86400
+    },
+    "resolution": 60,
+    "arrival": {
+      "distribution": "gamma",
+      "cv": 0.7
+    }
+  },
+  "prefix_groups": [
+    {
+      "key": "qa_agent-system",
+      "tokens": 1024,
+      "scope": "task"
+    }
+  ],
+  "tasks": [
+    {
+      "key": "qa_agent",
+      "weight": 1,
+      "clients": {
+        "count": 4
+      },
+      "arrival": {
+        "distribution": "gamma",
+        "cv": 0.7
+      },
+      "prefix_groups": [
+        {
+          "key": "qa_agent-system"
+        }
+      ],
+      "session": {
+        "requests": {
+          "distribution": "lognormal",
+          "mean": 2.4,
+          "cv": 0.8,
+          "min": 1,
+          "max": 12
+        },
+        "initial_private_tokens": {
+          "distribution": "lognormal",
+          "mean": 600,
+          "cv": 0.7,
+          "min": 1,
+          "max": 4000
+        },
+        "growth_multiplier": {
+          "distribution": "lognormal",
+          "mean": 1,
+          "cv": 0.35,
+          "min": 0.2,
+          "max": 3
+        },
+        "external_tokens": {
+          "distribution": "lognormal",
+          "mean": 1500,
+          "cv": 0.9,
+          "min": 1,
+          "max": 8000
+        },
+        "output_tokens": {
+          "distribution": "lognormal",
+          "mean": 240,
+          "cv": 0.7,
+          "min": 1,
+          "max": 1600
+        },
+        "gap": {
+          "distribution": "mixture",
+          "weights": [
+            0.85,
+            0.13,
+            0.02
+          ],
+          "components": [
+            {
+              "distribution": "lognormal",
+              "mean": 3,
+              "cv": 0.6
+            },
+            {
+              "distribution": "lognormal",
+              "mean": 15,
+              "cv": 1
+            },
+            {
+              "distribution": "lognormal",
+              "mean": 120,
+              "cv": 1.5
+            }
+          ]
+        },
+        "max_context_tokens": 262144
+      },
+      "notes": "短流程工具问答；调用均值参考 XPerf Table 2 的 LLMCompiler 2.4 calls/user task；线性短链近似，不模拟其执行 DAG。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。 Gap 为三个连续 Lognormal 的人工参考混合，依据多时间尺度规律而非实测间隔拟合；权重、mean、CV 均为补充假设，依据及局限见 docs/task-gap-mixtures.md。 每次独立选择分量再随机采样，无固定间隔或 min/max 裁剪；不模拟阶段转移。"
+    }
+  ]
+}
