@@ -1,0 +1,90 @@
+{
+  "version": 3,
+  "duration": 86400,
+  "seed": 42,
+  "block_size": 128,
+  "notes": "24h coding_agent; target 2251510 unique blocks (+/-2%). Same daily arrival curve shape, task profiles and seed=42; only session arrival intensity scaled. Mixed tasks have equal session weights. Coding uses whole TraceLab sessions; synthetic task labels are null.",
+  "traffic": {
+    "session_rate": {
+      "points": [
+        [
+          0,
+          0.017583026198489445
+        ],
+        [
+          3600,
+          0.020513530564904355
+        ],
+        [
+          7200,
+          0.029305043664149075
+        ],
+        [
+          25200,
+          0.029305043664149075
+        ],
+        [
+          28800,
+          0.019048278381696898
+        ],
+        [
+          32400,
+          0.029305043664149075
+        ],
+        [
+          54000,
+          0.029305043664149075
+        ],
+        [
+          57600,
+          0.019048278381696898
+        ],
+        [
+          61200,
+          0.029305043664149075
+        ],
+        [
+          79200,
+          0.029305043664149075
+        ],
+        [
+          82800,
+          0.020513530564904355
+        ],
+        [
+          86400,
+          0.017583026198489445
+        ]
+      ],
+      "period": 86400
+    },
+    "resolution": 60,
+    "arrival": {
+      "distribution": "gamma",
+      "cv": 0.7
+    }
+  },
+  "prefix_groups": [],
+  "tasks": [
+    {
+      "key": "coding_agent",
+      "weight": 1,
+      "clients": {
+        "count": 4,
+        "weight_exponent": 1
+      },
+      "arrival": {
+        "distribution": "gamma",
+        "cv": 0.7
+      },
+      "session": {
+        "max_context_tokens": 262144
+      },
+      "notes": "TraceLab v0.0.2 whole-session sampling; relative input-ready timestamps and observed user boundaries.",
+      "source": {
+        "type": "tracelab",
+        "path": "../../../runs/tracelab-screen-v002/syfi_coding_trace.jsonl.gz"
+      }
+    }
+  ]
+}

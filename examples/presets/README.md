@@ -4,6 +4,7 @@
 
 | 配置 | 规律与人工设定 |
 |---|---|
+| [task_scenarios_2p25m/](task_scenarios_2p25m/README.md) | 六类纯任务及交互/Agent 两类混合场景；24 小时、近似相同 225 万 unique blocks；仅调整 session 发起强度，Coding 使用 TraceLab 整段采样 |
 | [tracelab_coding.json](tracelab_coding.json) | TraceLab v0.0.2 整段 coding session 采样；保留时间、长度与 Agent 轮次标签，需本地源文件 |
 | [chat.json](chat.json) | 较少请求，较长轮间时间；历史随轮次增长 |
 | [coding_agent.json](coding_agent.json) | 较密集的 LLM 调用，工具结果式外部新增，异质 session 增长倍率 |

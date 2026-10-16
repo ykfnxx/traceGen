@@ -1,0 +1,156 @@
+{
+  "version": 3,
+  "duration": 86400,
+  "seed": 42,
+  "block_size": 128,
+  "notes": "24h research_agent; target 2251510 unique blocks (+/-2%). Same daily arrival curve shape, task profiles and seed=42; only session arrival intensity scaled. Mixed tasks have equal session weights. Coding uses whole TraceLab sessions; synthetic task labels are null.",
+  "traffic": {
+    "session_rate": {
+      "points": [
+        [
+          0,
+          0.023969999999999998
+        ],
+        [
+          3600,
+          0.027965000000000004
+        ],
+        [
+          7200,
+          0.03995
+        ],
+        [
+          25200,
+          0.03995
+        ],
+        [
+          28800,
+          0.0259675
+        ],
+        [
+          32400,
+          0.03995
+        ],
+        [
+          54000,
+          0.03995
+        ],
+        [
+          57600,
+          0.0259675
+        ],
+        [
+          61200,
+          0.03995
+        ],
+        [
+          79200,
+          0.03995
+        ],
+        [
+          82800,
+          0.027965000000000004
+        ],
+        [
+          86400,
+          0.023969999999999998
+        ]
+      ],
+      "period": 86400
+    },
+    "resolution": 60,
+    "arrival": {
+      "distribution": "gamma",
+      "cv": 0.7
+    }
+  },
+  "prefix_groups": [
+    {
+      "key": "research_agent-system",
+      "tokens": 1536,
+      "scope": "task"
+    }
+  ],
+  "tasks": [
+    {
+      "key": "research_agent",
+      "weight": 1,
+      "clients": {
+        "count": 3
+      },
+      "arrival": {
+        "distribution": "gamma",
+        "cv": 0.7
+      },
+      "prefix_groups": [
+        {
+          "key": "research_agent-system"
+        }
+      ],
+      "session": {
+        "requests": {
+          "distribution": "lognormal",
+          "mean": 14.7,
+          "cv": 0.3,
+          "min": 1,
+          "max": 60
+        },
+        "initial_private_tokens": {
+          "distribution": "lognormal",
+          "mean": 1200,
+          "cv": 0.7,
+          "min": 1,
+          "max": 8000
+        },
+        "growth_multiplier": {
+          "distribution": "lognormal",
+          "mean": 1,
+          "cv": 0.35,
+          "min": 0.2,
+          "max": 3
+        },
+        "external_tokens": {
+          "distribution": "lognormal",
+          "mean": 6000,
+          "cv": 0.9,
+          "min": 1,
+          "max": 24000
+        },
+        "output_tokens": {
+          "distribution": "lognormal",
+          "mean": 700,
+          "cv": 0.7,
+          "min": 1,
+          "max": 5000
+        },
+        "gap": {
+          "distribution": "mixture",
+          "weights": [
+            0.45,
+            0.45,
+            0.1
+          ],
+          "components": [
+            {
+              "distribution": "lognormal",
+              "mean": 12,
+              "cv": 0.6
+            },
+            {
+              "distribution": "lognormal",
+              "mean": 60,
+              "cv": 1
+            },
+            {
+              "distribution": "lognormal",
+              "mean": 300,
+              "cv": 1.5
+            }
+          ]
+        },
+        "max_context_tokens": 262144
+      },
+      "notes": "DeerFlow 式串行搜索汇总；调用均值参考 XPerf Table 2 的 DeerFlow 14.7 calls/user task；较大外部新增为人工设定，不代表 ODR 并行研究。 每个 session 对应一个用户任务的线性执行；CV、上下界、token 长度、间隔、client 和权重均为人工假设。间隔是相邻 LLM 请求到达之差。 Gap 为三个连续 Lognormal 的人工参考混合，依据多时间尺度规律而非实测间隔拟合；权重、mean、CV 均为补充假设，依据及局限见 docs/task-gap-mixtures.md。 每次独立选择分量再随机采样，无固定间隔或 min/max 裁剪；不模拟阶段转移。"
+    }
+  ]
+}
